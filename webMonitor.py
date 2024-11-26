@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # Start Ngrok tunnel
-public_url = ngrok.connect(8501)  # Connect to Streamlit's default port
+# Connect to Streamlit's default port
 logging.info(f"Public URL: {public_url}")
 st.write(f"Access your Streamlit app publicly at: [Streamlit App]({public_url})")
 
