@@ -3,7 +3,6 @@ import time
 import pandas as pd
 import requests
 import psutil
-from pyngrok import ngrok
 import logging
 
 # Set Streamlit page configuration
@@ -11,11 +10,6 @@ st.set_page_config(
     page_title='Smart Dashboard',
     layout="wide",
 )
-
-# Start Ngrok tunnel
-# Connect to Streamlit's default port
-logging.info(f"Public URL: {public_url}")
-st.write(f"Access your Streamlit app publicly at: [Streamlit App]({public_url})")
 
 # Init kolona za dijagrame
 col1, col2, col3 = st.columns(3)
