@@ -9,97 +9,6 @@ from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from io import BytesIO
 
-# Function to generate PDF report
-def generate_pdf(report_data):
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    c.setFont("Helvetica", 12)
-
-    # Title
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(200, 770, "System Performance Report")
-    
-    # Add date and time
-    c.setFont("Helvetica", 12)
-    c.drawString(30, 740, f"Date and Time: {report_data['date_time']}")
-
-    # Add dataset summary
-    c.drawString(30, 720, "Dataset Summary:")
-    y_position = 700
-    for column, value in report_data['dataset_summary'].items():
-        c.drawString(30, y_position, f"{column}: {value}")
-        y_position -= 20
-
-    # Add system performance
-    c.drawString(30, y_position, "System Performance:")
-    y_position -= 20
-    for metric, value in report_data['system_performance'].items():
-        c.drawString(30, y_position, f"{metric}: {value}")
-        y_position -= 20
-    
-    # Add chart data
-    c.drawString(30, y_position, "Real-time Monitoring Data:")
-    y_position -= 20
-    for chart, data in report_data['chart_data'].items():
-        c.drawString(30, y_position, f"{chart}: {data}")
-        y_position -= 20
-    
-    # Save PDF
-    c.save()
-    buffer.seek(0)
-    return buffer
-
-# Function to get report data
-def get_report_data():
-    # Get system performance data
-    cpu_usage = psutil.cpu_percent(interval=0.1)
-    memory_info = psutil.virtual_memory()
-    disk_usage = psutil.disk_usage('/')
-    
-    system_performance = {
-        "CPU usage": f"{cpu_usage}%",
-        "RAM usage": f"{memory_info.percent}%",
-        "Disk usage": f"{disk_usage.percent}%"
-    }
-
-    # Get dataset summary (example of summary, can be customized)
-    dataset_summary = {
-        "Rows": len(df),
-        "Columns": len(df.columns),
-        "Max Voltage": df["Voltage"].max(),
-        "Max Current": df["Current"].max()
-    }
-
-    # Get chart data (Example of real-time data from charts)
-    chart_data = {
-        "CPU Usage": [cpu_usage],
-        "Memory Usage": [memory_info.percent],
-        "Disk Usage": [disk_usage.percent]
-    }
-
-    # Prepare report data
-    report_data = {
-        "date_time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "system_performance": system_performance,
-        "dataset_summary": dataset_summary,
-        "chart_data": chart_data
-    }
-    return report_data
-
-# Add button to generate and download PDF report
-st.markdown("### Generate PDF Report")
-if st.button("Generate Report"):
-    report_data = get_report_data()
-    pdf_buffer = generate_pdf(report_data)
-    
-    # Provide the download link for the generated PDF
-    st.download_button(
-        label="Download PDF Report",
-        data=pdf_buffer,
-        file_name="system_performance_report.pdf",
-        mime="application/pdf"
-    )
-
 # Set Streamlit page configuration
 st.set_page_config(
     page_title='Smart Dashboard',
@@ -293,3 +202,9 @@ for _ in range(100):
     memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
     disk_chart.add_rows({"Disk Usage": [psutil.disk_usage('/').percent]})
     time.sleep(0.5)
+
+# PDF Generacija izvestaja
+def generate_pdf(report_data):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    c.setFont
