@@ -202,3 +202,43 @@ for _ in range(100):
     memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
     disk_chart.add_rows({"Disk Usage": [psutil.disk_usage('/').percent]})
     time.sleep(0.5)
+
+# Ensure the 'Time' column is in datetime format
+df['Time'] = pd.to_datetime(df['Time'], errors='coerce').dt.time  # Convert to time, handle errors gracefully
+
+# Add Historic Data Analysis functionality
+st.markdown("### Historic Data Analysis")
+
+# Extract the minimum and maximum time values
+min_time = df["Time"].min()
+max_time = df["Time"].max()
+
+# Create time range selector for filtering by time only
+start_time = st.time_input("Start Time", value=min_time)
+end_time = st.time_input("End Time", value=max_time)
+
+# Filter the DataFrame based on the selected time range
+df_filtered = df[
+    (df["Time"] >= start_time) & 
+    (df["Time"] <= end_time)
+]
+
+# Create line charts for key metrics over the selected time range
+st.markdown("### Historical Data Visualization")
+chart_col1, chart_col2 = st.columns(2)
+
+# Plot historical Voltage and Current
+chart_col1.subheader("Voltage [V] and Current")
+chart_col1.line_chart(df_filtered[["Voltage", "Current"]])
+
+# Plot historical Power Data
+chart_col2.subheader("Power Data (Active, Reactive, Apparent)")
+chart_col2.line_chart(df_filtered[["Active_Power", "Reactive_Power", "Apperent_Power"]])
+
+# Summary of the historical data in the selected range
+st.markdown("### Summary of Selected Data Range")
+st.write(df_filtered.describe())
+
+# Display the filtered dataset
+st.write("Filtered Data:")
+st.table(df_filtered)
