@@ -4,6 +4,10 @@ import pandas as pd
 import requests
 import psutil
 import logging
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
 # Set Streamlit page configuration
 st.set_page_config(
@@ -198,3 +202,9 @@ for _ in range(100):
     memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
     disk_chart.add_rows({"Disk Usage": [psutil.disk_usage('/').percent]})
     time.sleep(0.5)
+
+# PDF Generacija izvestaja
+def generate_pdf(report_data):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    c.setFont
