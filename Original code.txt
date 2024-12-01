@@ -3,7 +3,13 @@ import time
 import pandas as pd
 import requests
 import psutil
+import logging
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from io import BytesIO
 
+# Set Streamlit page configuration
 st.set_page_config(
     page_title='Smart Dashboard',
     layout="wide",
@@ -81,7 +87,7 @@ voltage_threshold = st.slider("Set Voltage Threshold", min_value=0.0, max_value=
 if df["Voltage"].max() > voltage_threshold:
     st.warning("Voltage exceeded threshold!")
 
-# Sumiranje podataka
+# Sazetak podataka
 st.markdown("### Dataset Summary")
 st.write(df.describe())
 
@@ -163,9 +169,76 @@ try:
 except Exception as e:
     st.error(f"An error occurred while displaying updated columns: {e}")
 
-# Monitoring performansi
-st.markdown("### Performance Monitoring")
-with st.expander("Performance Overview"):
-    st.write("CPU Utilization Percentage:", psutil.cpu_percent(), "%")  # CPU usage
-    st.write("Memory Usage Percentage:", psutil.virtual_memory().percent, "%")  # RAM usage
-    st.write("Loading data in progress...")
+# Napredno praćenje performansi sistema
+st.markdown("### Performance monitor")
+with st.expander("System performance overview"):
+    # Prikaz osnovnih performansi
+    cpu_usage = psutil.cpu_percent(interval=0.1)
+    memory_info = psutil.virtual_memory()
+    disk_usage = psutil.disk_usage('/')
+    net_io = psutil.net_io_counters()
+
+    # Prikaz detaljnih podataka
+    st.write(f"**CPU usage:** {cpu_usage}%")
+    st.write(f"**RAM usage:** {memory_info.percent}%")
+    st.write(f"**Total RAM memory:** {memory_info.total / (1024 ** 3):.2f} GB")
+    st.write(f"**Available RAM memory:** {memory_info.available / (1024 ** 3):.2f} GB")
+    st.write(f"**Disk usage:** {disk_usage.percent}%")
+    st.write(f"**Total space on the Disk:** {disk_usage.total / (1024 ** 3):.2f} GB")
+    st.write(f"**Available memory on Disk:** {disk_usage.free / (1024 ** 3):.2f} GB")
+    st.write(f"**Sent data:** {net_io.bytes_sent / (1024 ** 2):.2f} MB")
+    st.write(f"**Data received:** {net_io.bytes_recv / (1024 ** 2):.2f} MB")
+
+# Dodavanje grafova za CPU, RAM i Disk
+st.markdown("#### Real-time Monitoring for CPU, RAM and Disk")
+perf_col1, perf_col2, perf_col3 = st.columns(3)
+cpu_chart = perf_col1.line_chart({"CPU Usage": []})
+memory_chart = perf_col2.line_chart({"Memory Usage": []})
+disk_chart = perf_col3.line_chart({"Disk Usage": []})
+
+# Real-time praćenje podataka
+for _ in range(100):
+    cpu_chart.add_rows({"CPU Usage": [psutil.cpu_percent()]})
+    memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
+    disk_chart.add_rows({"Disk Usage": [psutil.disk_usage('/').percent]})
+    time.sleep(0.5)
+
+# Ensure the 'Time' column is in datetime format
+df['Time'] = pd.to_datetime(df['Time'], errors='coerce').dt.time  # Convert to time, handle errors gracefully
+
+# Dodavanje Istorijskog pregleda podataka - rana faza.
+st.markdown("### Historic Data Analysis")
+
+# Ekstrakcija minimalnih i maksimalnih vremenskih vrednosti
+min_time = df["Time"].min()
+max_time = df["Time"].max()
+
+# Kreiranje biraca vremenskog opsega za filtriranje
+start_time = st.time_input("Start Time", value=min_time)
+end_time = st.time_input("End Time", value=max_time)
+
+# Filtriranje DataFrame-a bazirano na odabranom vremenskom opsegu
+df_filtered = df[
+    (df["Time"] >= start_time) & 
+    (df["Time"] <= end_time)
+]
+
+# Kreiranje line charts za kljucne metrike za odabrani vremenski opseg
+st.markdown("### Historical Data Visualization")
+chart_col1, chart_col2 = st.columns(2)
+
+# Crtanje istorijskog prikaza napona i struje
+chart_col1.subheader("Voltage [V] and Current")
+chart_col1.line_chart(df_filtered[["Voltage", "Current"]])
+
+# Crtanje Istorijskih podataka za Power
+chart_col2.subheader("Power Data (Active, Reactive, Apparent)")
+chart_col2.line_chart(df_filtered[["Active_Power", "Reactive_Power", "Apperent_Power"]])
+
+# Sazetak istorijskih podataka u izabranom opsegu
+st.markdown("### Summary of Selected Data Range")
+st.write(df_filtered.describe())
+
+# Prikaz filtriranih podataka
+st.write("Filtered Data:")
+st.table(df_filtered)
