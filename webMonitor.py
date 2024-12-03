@@ -71,11 +71,48 @@ voltage_threshold = st.slider("Set Voltage Threshold", min_value=0.0, max_value=
 if df["Voltage"].max() > voltage_threshold:
     st.warning("Voltage exceeded threshold!")
 
-# Weather API Integration
+# Weather API Integration for multiple cities
 st.markdown("### Weather Data")
+cities = {
+    "Zrenjanin, Serbia": {"latitude": 45.3755, "longitude": 20.4020},
+    "Belgrade, Serbia": {"latitude": 44.8176, "longitude": 20.4633},
+    "Novi Sad, Serbia": {"latitude": 45.2671, "longitude": 19.8335},
+    "Banja Luka, Bosnia and Herzegovina": {"latitude": 44.7722, "longitude": 17.1910},
+    "Sarajevo, Bosnia and Herzegovina": {"latitude": 43.8486, "longitude": 18.3564},
+    "Zagreb, Croatia": {"latitude": 45.8125, "longitude": 15.978}
+}
+
 try:
-    weather = requests.get("https://api.open-meteo.com/v1/forecast?latitude=35&longitude=139&hourly=temperature_2m").json()
-    st.write("Temperature (°C):", weather["hourly"]["temperature_2m"][:5])
+    weather_data_list = []
+    
+    # Fetch weather data for each city
+    for city, coords in cities.items():
+        latitude = coords["latitude"]
+        longitude = coords["longitude"]
+        
+        # Make the API request
+        weather = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m").json()
+
+        # Check if the required data exists in the response
+        if "hourly" in weather and "temperature_2m" in weather["hourly"]:
+            temperatures = weather["hourly"]["temperature_2m"][:5]  # Get the first 5 hourly temperature readings
+            if temperatures:  # If data exists
+                # Add the data to the list
+                for temp in temperatures:
+                    weather_data_list.append({"Location": city, "Temperature (°C)": temp})
+
+        else:
+            st.error(f"Error fetching data for {city}.")
+    
+    # Create a DataFrame for the collected weather data
+    if weather_data_list:
+        weather_data = pd.DataFrame(weather_data_list)
+
+        # Display the weather data table
+        st.table(weather_data)
+    else:
+        st.error("No weather data found.")
+        
 except Exception as e:
     st.error(f"Unable to fetch weather data: {e}")
 
