@@ -97,9 +97,12 @@ try:
         if "hourly" in weather and "temperature_2m" in weather["hourly"]:
             temperatures = weather["hourly"]["temperature_2m"][:5]  # Get the first 5 hourly temperature readings
             if temperatures:  # If data exists
-                # Add the data to the list
+                # Add the data to the list with rounded temperature
                 for temp in temperatures:
-                    weather_data_list.append({"Location": city, "Temperature (°C)": temp})
+                    weather_data_list.append({
+                        "Location": city,
+                        "Temperature (°C)": round(temp, 1)  # Round temperature to 1 decimal place
+                    })
 
         else:
             st.error(f"Error fetching data for {city}.")
@@ -115,6 +118,7 @@ try:
         
 except Exception as e:
     st.error(f"Unable to fetch weather data: {e}")
+
 
 # Real-time Monitoring for CPU, RAM, Disk
 st.markdown("### Performance Monitor")
