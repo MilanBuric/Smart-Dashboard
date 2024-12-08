@@ -3,6 +3,9 @@ import time
 import pandas as pd
 import requests
 import psutil
+from sklearn.base import BaseEstimator
+from sklearn.feature_selection import SelectorMixin
+from sklearn.feature_selection import SelectKBest, mutual_info_regression
 
 # Set Streamlit page configuration
 st.set_page_config(
