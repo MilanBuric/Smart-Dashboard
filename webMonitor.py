@@ -13,9 +13,13 @@ st.set_page_config(
     layout="wide",
 )
 
-# Function to dynamically calculate threshold for a given column (if needed)
-def calculate_dynamic_threshold(data, factor=1.1):
-    return data.mean() + factor * data.std()
+# --- Dynamic Threshold Function ---
+def calculate_dynamic_threshold(series, factor=2.0):
+    """
+    Calculate a dynamic threshold for a given pandas Series.
+    Default uses mean + factor * std.
+    """
+    return series.mean() + factor * series.std()
 
 # Initialize columns for charts
 col1, col2, col3 = st.columns(3)
@@ -72,9 +76,25 @@ if selected_columns:
     st.write("Filtered Columns Data:")
     st.table(df[selected_columns])
 
-# Dynamic Voltage Slider (automatically moves based on voltage value)
-st.markdown("### Voltage Threshold")
-voltage_slider_container = st.empty()  # Container for the dynamic slider
+# --- Dynamic Voltage Threshold Section ---
+st.markdown("### Dynamic Voltage Threshold")
+if "Voltage" in df.columns:
+    dynamic_voltage_value = calculate_dynamic_threshold(df["Voltage"], factor=2.0)
+    # Slider defaults to the dynamic threshold but can be adjusted manually
+    voltage_threshold = st.slider(
+        "Set Voltage Threshold",
+        min_value=0.0,
+        max_value=300.0,
+        step=0.1,
+        value=float(dynamic_voltage_value)
+    )
+    st.write(f"Dynamic Voltage Threshold (mean + 2 * std): {dynamic_voltage_value:.2f} V")
+
+    # Check if Voltage exceeds threshold at any point in the dataset
+    if df["Voltage"].max() > voltage_threshold:
+        st.warning("Voltage exceeded threshold!")
+else:
+    st.error("Voltage column not found in dataset.")
 
 # Weather API Integration for multiple cities
 st.markdown("### Weather Data")
@@ -95,26 +115,23 @@ try:
         latitude = coords["latitude"]
         longitude = coords["longitude"]
         
-        # Make the API request
-        weather = requests.get(f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m").json()
+        weather = requests.get(
+            f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m"
+        ).json()
 
-        # Check if the required data exists in the response
         if "hourly" in weather and "temperature_2m" in weather["hourly"]:
-            temperatures = weather["hourly"]["temperature_2m"][:5]  # Get the first 5 hourly temperature readings
-            if temperatures:  # If data exists
-                # Add the data to the list with completely rounded temperature
+            temperatures = weather["hourly"]["temperature_2m"][:5]  # Get first 5 hourly readings
+            if temperatures:
                 for temp in temperatures:
                     weather_data_list.append({
                         "Location": city,
-                        "Temperature (°C)": round(temp)  # Round temperature to the nearest integer
+                        "Temperature (°C)": round(temp)
                     })
         else:
             st.error(f"Error fetching data for {city}.")
     
-    # Create a DataFrame for the collected weather data
     if weather_data_list:
         weather_data = pd.DataFrame(weather_data_list)
-        # Display the weather data table
         st.table(weather_data)
     else:
         st.error("No weather data found.")
@@ -136,20 +153,18 @@ disk_chart = perf_col3.line_chart({"Disk Usage": []})
 
 # System performance overview
 with st.expander("System performance overview"):
-    # Get system performance data
     cpu_usage = psutil.cpu_percent(interval=0.1)
     memory_info = psutil.virtual_memory()
-    disk_usage = psutil.disk_usage('/')
+    disk_usage_info = psutil.disk_usage('/')
     net_io = psutil.net_io_counters()
 
-    # Display the system performance information
     st.write(f"**CPU usage:** {cpu_usage}%")
     st.write(f"**RAM usage:** {memory_info.percent}%")
     st.write(f"**Total RAM memory:** {memory_info.total / (1024 ** 3):.2f} GB")
     st.write(f"**Available RAM memory:** {memory_info.available / (1024 ** 3):.2f} GB")
-    st.write(f"**Disk usage:** {disk_usage.percent}%")
-    st.write(f"**Total space on the Disk:** {disk_usage.total / (1024 ** 3):.2f} GB")
-    st.write(f"**Available memory on Disk:** {disk_usage.free / (1024 ** 3):.2f} GB")
+    st.write(f"**Disk usage:** {disk_usage_info.percent}%")
+    st.write(f"**Total space on the Disk:** {disk_usage_info.total / (1024 ** 3):.2f} GB")
+    st.write(f"**Available memory on Disk:** {disk_usage_info.free / (1024 ** 3):.2f} GB")
     st.write(f"**Sent data:** {net_io.bytes_sent / (1024 ** 2):.2f} MB")
     st.write(f"**Data received:** {net_io.bytes_recv / (1024 ** 2):.2f} MB")
 
@@ -198,21 +213,10 @@ def update_real_time_charts(row):
 # Iteration through DataFrame rows for real-time updates
 all_updated_columns = {}
 for i, row in df.iterrows():
-    # Update the dynamic voltage slider to reflect the current voltage value
-    if "Voltage" in row:
-        voltage_slider_container.slider(
-            "Voltage Threshold",
-            min_value=0.0,
-            max_value=300.0,
-            step=0.1,
-            value=row["Voltage"],
-            key="voltage_slider"
-        )
     update_performance_metrics()
     updated_columns = update_real_time_charts(row)
     all_updated_columns.update(updated_columns)
 
-    # Update Date and Time Metrics
     if "Date" in row:
         YMDt.metric("Date", row["Date"])
     if "Time" in row:
@@ -225,9 +229,16 @@ try:
     initial_message.empty()
     with st.container():
         updated_columns_header = col_updated.markdown("### Updated Columns with Last Known Values:")
-        # Filter the updated columns for relevance (Voltage, Frequency, Power, etc.)
-        relevant_columns = ["Voltage", "Current", "Measured_Frequency", "Active_Power", "Reactive_Power", "Apperent_Power", "Phase_Voltage_Angle", "Cos_Phi", "Power_Factor"]
-        formatted_updated_columns = [{"Column": col, "Last Known Value": value} for col, value in all_updated_columns.items() if col in relevant_columns]
+        relevant_columns = [
+            "Voltage", "Current", "Measured_Frequency", "Active_Power",
+            "Reactive_Power", "Apperent_Power", "Phase_Voltage_Angle",
+            "Cos_Phi", "Power_Factor"
+        ]
+        formatted_updated_columns = [
+            {"Column": col, "Last Known Value": value}
+            for col, value in all_updated_columns.items()
+            if col in relevant_columns
+        ]
         updated_columns_df = pd.DataFrame(formatted_updated_columns)
         col_updated.table(updated_columns_df)
 except Exception as e:
@@ -257,21 +268,18 @@ st.dataframe(df_filtered)
 
 # Automatic Feature Optimization Section
 st.markdown("### Automatic Feature Optimization")
-# Identify numeric columns for optimization
 numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
 if numeric_columns:
     target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
     k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
     
     def automatic_feature_optimization(dataframe, target, k):
-        # Select only numeric columns
         dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
         if target not in dataframe_numeric.columns:
             st.error("Target column must be numeric for optimization.")
             return None, None
         X = dataframe_numeric.drop(columns=[target])
         y = dataframe_numeric[target]
-        # Ensure k does not exceed the available features
         k = min(k, X.shape[1])
         selector = SelectKBest(score_func=mutual_info_regression, k=k)
         selector.fit(X, y)
