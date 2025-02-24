@@ -13,6 +13,10 @@ st.set_page_config(
     layout="wide",
 )
 
+# Function to dynamically calculate threshold for a given column
+def calculate_dynamic_threshold(data, factor=1.1):
+    return data.mean() + factor * data.std()
+
 # Initialize columns for charts
 col1, col2, col3 = st.columns(3)
 col4, col5, col6 = st.columns(3)
@@ -68,11 +72,16 @@ if selected_columns:
     st.write("Filtered Columns Data:")
     st.table(df[selected_columns])
 
-# Voltage Threshold
+# Voltage Threshold with Dynamic Adjustment
 st.markdown("### Voltage Threshold")
-voltage_threshold = st.slider("Set Voltage Threshold", min_value=0.0, max_value=300.0, step=0.1)
-if df["Voltage"].max() > voltage_threshold:
-    st.warning("Voltage exceeded threshold!")
+if "Voltage" in df.columns:
+    dynamic_voltage_threshold = calculate_dynamic_threshold(df["Voltage"], factor=1.1)
+    voltage_threshold = st.slider("Set Voltage Threshold", min_value=0.0, max_value=300.0, step=0.1, value=float(dynamic_voltage_threshold))
+    st.write(f"Dynamic Voltage Threshold: {dynamic_voltage_threshold:.2f} V")
+    if df["Voltage"].max() > voltage_threshold:
+        st.warning("Voltage exceeded threshold!")
+else:
+    st.error("Voltage column not found in dataset.")
 
 # Weather API Integration for multiple cities
 st.markdown("### Weather Data")
