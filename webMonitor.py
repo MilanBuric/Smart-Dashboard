@@ -7,7 +7,7 @@ from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
 
-# Set Streamlit page configuration
+# ----------------- SET STREAMLIT PAGE CONFIGURATION ----------------- #
 st.set_page_config(
     page_title='Smart Dashboard',
     layout="wide",
@@ -200,10 +200,8 @@ def update_real_time_charts(row):
 st.markdown("### Automatic Feature Optimization (Live)")
 numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
 afo_placeholder = st.empty()
-# Choose target and number of features once (can be modified by user)
 target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
 k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
-# Live DataFrame for processed rows
 df_live = pd.DataFrame(columns=df.columns)
 
 def automatic_feature_optimization(dataframe, target, k):
@@ -243,8 +241,8 @@ for i, row in df.iterrows():
     updated_columns = update_real_time_charts(row)
     all_updated_columns.update(updated_columns)
     
-    # Append current row to live DataFrame for AFO
-    df_live = df_live.append(row, ignore_index=True)
+    # Append current row to live DataFrame for AFO using pd.concat instead of deprecated append
+    df_live = pd.concat([df_live, pd.DataFrame([row])], ignore_index=True)
     # Update live AFO every 10 rows
     if len(df_live) % 10 == 0:
         result_df, selected_features = automatic_feature_optimization(df_live, target_column, k)
