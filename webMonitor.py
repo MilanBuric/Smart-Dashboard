@@ -196,6 +196,34 @@ def update_real_time_charts(row):
     
     return updated_columns
 
+# ----------------- SET UP LIVE AUTOMATIC FEATURE OPTIMIZATION ----------------- #
+st.markdown("### Automatic Feature Optimization (Live)")
+numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+afo_placeholder = st.empty()
+# Choose target and number of features once (can be modified by user)
+target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
+k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
+# Live DataFrame for processed rows
+df_live = pd.DataFrame(columns=df.columns)
+
+def automatic_feature_optimization(dataframe, target, k):
+    dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
+    if target not in dataframe_numeric.columns or dataframe_numeric.empty:
+        return None, None
+    X = dataframe_numeric.drop(columns=[target])
+    y = dataframe_numeric[target]
+    k = min(k, X.shape[1])
+    selector = SelectKBest(score_func=mutual_info_regression, k=k)
+    selector.fit(X, y)
+    scores = selector.scores_
+    feature_names = X.columns
+    result_df = pd.DataFrame({
+        "Feature": feature_names,
+        "Score": scores
+    }).sort_values(by="Score", ascending=False)
+    selected_features = result_df.head(k)["Feature"].tolist()
+    return result_df, selected_features
+
 # ----------------- REAL-TIME LOOP ----------------- #
 all_updated_columns = {}
 for i, row in df.iterrows():
@@ -208,22 +236,29 @@ for i, row in df.iterrows():
                 max_value=300.0,
                 step=0.1,
                 value=float(row["Voltage"]),
-                key=f"voltage_slider_{i}"  # unique key each iteration
+                key=f"voltage_slider_{i}"
             )
-
-    # Update performance metrics
+    
     update_performance_metrics()
-
-    # Update charts with current row
     updated_columns = update_real_time_charts(row)
     all_updated_columns.update(updated_columns)
-
-    # Update Date and Time metrics
+    
+    # Append current row to live DataFrame for AFO
+    df_live = df_live.append(row, ignore_index=True)
+    # Update live AFO every 10 rows
+    if len(df_live) % 10 == 0:
+        result_df, selected_features = automatic_feature_optimization(df_live, target_column, k)
+        if result_df is not None:
+            with afo_placeholder.container():
+                st.markdown("#### Live Automatic Feature Optimization Results")
+                st.dataframe(result_df)
+                st.write("Selected Features:", selected_features)
+    
     if "Date" in row:
         YMDt.metric("Date", row["Date"])
     if "Time" in row:
         Tt.metric("Time", row["Time"])
-
+    
     time.sleep(0.1)
 
 # ----------------- DISPLAY UPDATED COLUMNS ----------------- #
@@ -253,7 +288,6 @@ start_time = st.time_input("Start Time", value=df["Time"].min())
 end_time = st.time_input("End Time", value=df["Time"].max())
 df_filtered = df[(df["Time"] >= start_time) & (df["Time"] <= end_time)]
 
-# Display historical data charts
 chart_col1, chart_col2 = st.columns(2)
 chart_col1.subheader("Voltage [V] and Current")
 chart_col1.line_chart(df_filtered[["Voltage", "Current"]])
@@ -264,41 +298,5 @@ chart_col2.line_chart(df_filtered[["Active_Power", "Reactive_Power", "Apperent_P
 st.markdown("### Summary of Selected Data Range")
 st.write(df_filtered.describe())
 
-# Display filtered data
 st.write("Filtered Data:")
 st.dataframe(df_filtered)
-
-# ----------------- AUTOMATIC FEATURE OPTIMIZATION ----------------- #
-st.markdown("### Automatic Feature Optimization")
-numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-if numeric_columns:
-    target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
-    k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
-    
-    def automatic_feature_optimization(dataframe, target, k):
-        dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
-        if target not in dataframe_numeric.columns:
-            st.error("Target column must be numeric for optimization.")
-            return None, None
-        X = dataframe_numeric.drop(columns=[target])
-        y = dataframe_numeric[target]
-        k = min(k, X.shape[1])
-        selector = SelectKBest(score_func=mutual_info_regression, k=k)
-        selector.fit(X, y)
-        scores = selector.scores_
-        feature_names = X.columns
-        result_df = pd.DataFrame({
-            "Feature": feature_names,
-            "Score": scores
-        }).sort_values(by="Score", ascending=False)
-        selected_features = result_df.head(k)["Feature"].tolist()
-        return result_df, selected_features
-    
-    result_df, selected_features = automatic_feature_optimization(df, target_column, k)
-    if result_df is not None:
-        st.write("Feature scores for all numeric columns:")
-        st.dataframe(result_df)
-        st.write("Selected Features:")
-        st.write(selected_features)
-else:
-    st.warning("No numeric columns available for optimization.")
