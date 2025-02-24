@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# Function to dynamically calculate threshold for a given column
+# Function to dynamically calculate threshold for a given column (if needed)
 def calculate_dynamic_threshold(data, factor=1.1):
     return data.mean() + factor * data.std()
 
@@ -72,16 +72,9 @@ if selected_columns:
     st.write("Filtered Columns Data:")
     st.table(df[selected_columns])
 
-# Voltage Threshold with Dynamic Adjustment
+# Dynamic Voltage Slider (automatically moves based on voltage value)
 st.markdown("### Voltage Threshold")
-if "Voltage" in df.columns:
-    dynamic_voltage_threshold = calculate_dynamic_threshold(df["Voltage"], factor=1.1)
-    voltage_threshold = st.slider("Set Voltage Threshold", min_value=0.0, max_value=300.0, step=0.1, value=float(dynamic_voltage_threshold))
-    st.write(f"Dynamic Voltage Threshold: {dynamic_voltage_threshold:.2f} V")
-    if df["Voltage"].max() > voltage_threshold:
-        st.warning("Voltage exceeded threshold!")
-else:
-    st.error("Voltage column not found in dataset.")
+voltage_slider_container = st.empty()  # Container for the dynamic slider
 
 # Weather API Integration for multiple cities
 st.markdown("### Weather Data")
@@ -205,6 +198,16 @@ def update_real_time_charts(row):
 # Iteration through DataFrame rows for real-time updates
 all_updated_columns = {}
 for i, row in df.iterrows():
+    # Update the dynamic voltage slider to reflect the current voltage value
+    if "Voltage" in row:
+        voltage_slider_container.slider(
+            "Voltage Threshold",
+            min_value=0.0,
+            max_value=300.0,
+            step=0.1,
+            value=row["Voltage"],
+            key="voltage_slider"
+        )
     update_performance_metrics()
     updated_columns = update_real_time_charts(row)
     all_updated_columns.update(updated_columns)
