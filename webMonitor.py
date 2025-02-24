@@ -106,14 +106,12 @@ try:
                         "Location": city,
                         "Temperature (°C)": round(temp)  # Round temperature to the nearest integer
                     })
-
         else:
             st.error(f"Error fetching data for {city}.")
     
     # Create a DataFrame for the collected weather data
     if weather_data_list:
         weather_data = pd.DataFrame(weather_data_list)
-
         # Display the weather data table
         st.table(weather_data)
     else:
@@ -121,8 +119,6 @@ try:
         
 except Exception as e:
     st.error(f"Unable to fetch weather data: {e}")
-
-
 
 # Real-time Monitoring for CPU, RAM, Disk
 st.markdown("### Performance Monitor")
@@ -246,3 +242,41 @@ st.write(df_filtered.describe())
 # Display filtered data
 st.write("Filtered Data:")
 st.dataframe(df_filtered)
+
+# Automatic Feature Optimization Section
+st.markdown("### Automatic Feature Optimization")
+# Identify numeric columns for optimization
+numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+if numeric_columns:
+    target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
+    k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
+    
+    def automatic_feature_optimization(dataframe, target, k):
+        # Select only numeric columns
+        dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
+        if target not in dataframe_numeric.columns:
+            st.error("Target column must be numeric for optimization.")
+            return None, None
+        X = dataframe_numeric.drop(columns=[target])
+        y = dataframe_numeric[target]
+        # Ensure k does not exceed the available features
+        k = min(k, X.shape[1])
+        selector = SelectKBest(score_func=mutual_info_regression, k=k)
+        selector.fit(X, y)
+        scores = selector.scores_
+        feature_names = X.columns
+        result_df = pd.DataFrame({
+            "Feature": feature_names,
+            "Score": scores
+        }).sort_values(by="Score", ascending=False)
+        selected_features = result_df.head(k)["Feature"].tolist()
+        return result_df, selected_features
+    
+    result_df, selected_features = automatic_feature_optimization(df, target_column, k)
+    if result_df is not None:
+        st.write("Feature scores for all numeric columns:")
+        st.dataframe(result_df)
+        st.write("Selected Features:")
+        st.write(selected_features)
+else:
+    st.warning("No numeric columns available for optimization.")
