@@ -13,15 +13,15 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Dynamic Threshold Function ---
+# ----------------- DYNAMIC THRESHOLD FUNCTION ----------------- #
 def calculate_dynamic_threshold(series, factor=2.0):
     """
     Calculate a dynamic threshold for a given pandas Series.
-    Default uses mean + factor * std.
+    Default uses mean + (factor * std).
     """
     return series.mean() + factor * series.std()
 
-# Initialize columns for charts
+# ----------------- INITIAL UI SETUP ----------------- #
 col1, col2, col3 = st.columns(3)
 col4, col5, col6 = st.columns(3)
 
@@ -48,11 +48,11 @@ CP = col5.line_chart({"Cos_Phi": []})
 col6.subheader("Power Factor Data")
 PF = col6.line_chart({"Power_Factor": []})
 
-# Placeholder for Date and Time metrics
+# Placeholders for Date and Time metrics
 YMDt = st.empty()
 Tt = st.empty()
 
-# Load Dataset and Error handling
+# ----------------- LOAD DATASET ----------------- #
 try:
     df = pd.read_csv("demo_data.csv")
 except FileNotFoundError:
@@ -69,34 +69,25 @@ col_dataset.table(pd.DataFrame(df.columns.tolist(), columns=["Columns"]))
 
 initial_message = col_updated.info("The list of updated columns with their last known values will be displayed here after processing is complete.")
 
-# Filter Columns Section
+# ----------------- FILTER COLUMNS SECTION ----------------- #
 st.markdown("### Filter Columns")
 selected_columns = st.multiselect("Select columns to display:", options=df.columns)
 if selected_columns:
     st.write("Filtered Columns Data:")
     st.table(df[selected_columns])
 
-# --- Dynamic Voltage Threshold Section ---
-st.markdown("### Dynamic Voltage Threshold")
+# ----------------- DYNAMICALLY MOVING VOLTAGE SLIDER ----------------- #
+st.markdown("### Dynamic Voltage Threshold (Real-Time)")
+slider_placeholder = st.empty()  # We'll use this placeholder to update the slider each row
+
+# Pre-calculate a threshold if needed (optional, for reference)
 if "Voltage" in df.columns:
-    dynamic_voltage_value = calculate_dynamic_threshold(df["Voltage"], factor=2.0)
-    # Slider defaults to the dynamic threshold but can be adjusted manually
-    voltage_threshold = st.slider(
-        "Set Voltage Threshold",
-        min_value=0.0,
-        max_value=300.0,
-        step=0.1,
-        value=float(dynamic_voltage_value)
-    )
-    st.write(f"Dynamic Voltage Threshold (mean + 2 * std): {dynamic_voltage_value:.2f} V")
-
-    # Check if Voltage exceeds threshold at any point in the dataset
-    if df["Voltage"].max() > voltage_threshold:
-        st.warning("Voltage exceeded threshold!")
+    dynamic_voltage_calc = calculate_dynamic_threshold(df["Voltage"], factor=2.0)
+    st.write(f"Pre-calculated threshold (mean + 2*std): {dynamic_voltage_calc:.2f} V")
 else:
-    st.error("Voltage column not found in dataset.")
+    st.error("No 'Voltage' column found in dataset. Slider won't update.")
 
-# Weather API Integration for multiple cities
+# ----------------- WEATHER API INTEGRATION ----------------- #
 st.markdown("### Weather Data")
 cities = {
     "Zrenjanin, Serbia": {"latitude": 45.3755, "longitude": 20.4020},
@@ -109,18 +100,15 @@ cities = {
 
 try:
     weather_data_list = []
-    
-    # Fetch weather data for each city
     for city, coords in cities.items():
         latitude = coords["latitude"]
         longitude = coords["longitude"]
-        
         weather = requests.get(
             f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m"
         ).json()
 
         if "hourly" in weather and "temperature_2m" in weather["hourly"]:
-            temperatures = weather["hourly"]["temperature_2m"][:5]  # Get first 5 hourly readings
+            temperatures = weather["hourly"]["temperature_2m"][:5]
             if temperatures:
                 for temp in temperatures:
                     weather_data_list.append({
@@ -139,7 +127,7 @@ try:
 except Exception as e:
     st.error(f"Unable to fetch weather data: {e}")
 
-# Real-time Monitoring for CPU, RAM, Disk
+# ----------------- REAL-TIME PERFORMANCE MONITOR ----------------- #
 st.markdown("### Performance Monitor")
 perf_col1, perf_col2, perf_col3 = st.columns(3)
 perf_col1.subheader("CPU Usage")
@@ -151,7 +139,6 @@ memory_chart = perf_col2.line_chart({"Memory Usage": []})
 perf_col3.subheader("Disk Usage")
 disk_chart = perf_col3.line_chart({"Disk Usage": []})
 
-# System performance overview
 with st.expander("System performance overview"):
     cpu_usage = psutil.cpu_percent(interval=0.1)
     memory_info = psutil.virtual_memory()
@@ -168,7 +155,6 @@ with st.expander("System performance overview"):
     st.write(f"**Sent data:** {net_io.bytes_sent / (1024 ** 2):.2f} MB")
     st.write(f"**Data received:** {net_io.bytes_recv / (1024 ** 2):.2f} MB")
 
-# Real-time Updates for Charts
 def update_performance_metrics():
     cpu_chart.add_rows({"CPU Usage": [psutil.cpu_percent()]})
     memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
@@ -210,13 +196,29 @@ def update_real_time_charts(row):
     
     return updated_columns
 
-# Iteration through DataFrame rows for real-time updates
+# ----------------- REAL-TIME LOOP ----------------- #
 all_updated_columns = {}
 for i, row in df.iterrows():
+    # Update the slider for each incoming voltage value (if present)
+    if "Voltage" in row:
+        with slider_placeholder.container():
+            st.slider(
+                "Voltage Threshold (Live)",
+                min_value=0.0,
+                max_value=300.0,
+                step=0.1,
+                value=float(row["Voltage"]),
+                key=f"voltage_slider_{i}"  # unique key each iteration
+            )
+
+    # Update performance metrics
     update_performance_metrics()
+
+    # Update charts with current row
     updated_columns = update_real_time_charts(row)
     all_updated_columns.update(updated_columns)
 
+    # Update Date and Time metrics
     if "Date" in row:
         YMDt.metric("Date", row["Date"])
     if "Time" in row:
@@ -224,11 +226,11 @@ for i, row in df.iterrows():
 
     time.sleep(0.1)
 
-# Display updated columns with last known values
+# ----------------- DISPLAY UPDATED COLUMNS ----------------- #
 try:
     initial_message.empty()
     with st.container():
-        updated_columns_header = col_updated.markdown("### Updated Columns with Last Known Values:")
+        col_updated.markdown("### Updated Columns with Last Known Values:")
         relevant_columns = [
             "Voltage", "Current", "Measured_Frequency", "Active_Power",
             "Reactive_Power", "Apperent_Power", "Phase_Voltage_Angle",
@@ -244,7 +246,7 @@ try:
 except Exception as e:
     st.error(f"An error occurred while displaying updated columns: {e}")
 
-# Historic Data Analysis
+# ----------------- HISTORIC DATA ANALYSIS ----------------- #
 st.markdown("### Historic Data Analysis")
 df['Time'] = pd.to_datetime(df['Time'], errors='coerce').dt.time
 start_time = st.time_input("Start Time", value=df["Time"].min())
@@ -266,7 +268,7 @@ st.write(df_filtered.describe())
 st.write("Filtered Data:")
 st.dataframe(df_filtered)
 
-# Automatic Feature Optimization Section
+# ----------------- AUTOMATIC FEATURE OPTIMIZATION ----------------- #
 st.markdown("### Automatic Feature Optimization")
 numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
 if numeric_columns:
