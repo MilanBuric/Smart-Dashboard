@@ -1,4 +1,3 @@
-
 import streamlit as st
 import time
 import pandas as pd
@@ -8,21 +7,21 @@ from sklearn.base import BaseEstimator
 from sklearn.feature_selection import SelectorMixin
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
 
-# ----------------- SET STREAMLIT PAGE CONFIGURATION ----------------- #
+# Set Streamlit page configuration
 st.set_page_config(
     page_title='Smart Dashboard',
     layout="wide",
 )
 
-# ----------------- DYNAMIC THRESHOLD FUNCTION ----------------- #
+# --- Dynamic Threshold Function ---
 def calculate_dynamic_threshold(series, factor=2.0):
     """
     Calculate a dynamic threshold for a given pandas Series.
-    Default uses mean + (factor * std).
+    Default uses mean + factor * std.
     """
     return series.mean() + factor * series.std()
 
-# ----------------- INITIAL UI SETUP ----------------- #
+# Initialize columns for charts
 col1, col2, col3 = st.columns(3)
 col4, col5, col6 = st.columns(3)
 
@@ -49,11 +48,11 @@ CP = col5.line_chart({"Cos_Phi": []})
 col6.subheader("Power Factor Data")
 PF = col6.line_chart({"Power_Factor": []})
 
-# Placeholders for Date and Time metrics
+# Placeholder for Date and Time metrics
 YMDt = st.empty()
 Tt = st.empty()
 
-# ----------------- LOAD DATASET ----------------- #
+# Load Dataset and Error handling
 try:
     df = pd.read_csv("demo_data.csv")
 except FileNotFoundError:
@@ -70,25 +69,34 @@ col_dataset.table(pd.DataFrame(df.columns.tolist(), columns=["Columns"]))
 
 initial_message = col_updated.info("The list of updated columns with their last known values will be displayed here after processing is complete.")
 
-# ----------------- FILTER COLUMNS SECTION ----------------- #
+# Filter Columns Section
 st.markdown("### Filter Columns")
 selected_columns = st.multiselect("Select columns to display:", options=df.columns)
 if selected_columns:
     st.write("Filtered Columns Data:")
     st.table(df[selected_columns])
 
-# ----------------- DYNAMICALLY MOVING VOLTAGE SLIDER ----------------- #
-st.markdown("### Dynamic Voltage Threshold (Real-Time)")
-slider_placeholder = st.empty()  # We'll use this placeholder to update the slider each row
-
-# Pre-calculate a threshold if needed (optional, for reference)
+# --- Dynamic Voltage Threshold Section ---
+st.markdown("### Dynamic Voltage Threshold")
 if "Voltage" in df.columns:
-    dynamic_voltage_calc = calculate_dynamic_threshold(df["Voltage"], factor=2.0)
-    st.write(f"Pre-calculated threshold (mean + 2*std): {dynamic_voltage_calc:.2f} V")
-else:
-    st.error("No 'Voltage' column found in dataset. Slider won't update.")
+    dynamic_voltage_value = calculate_dynamic_threshold(df["Voltage"], factor=2.0)
+    # Slider defaults to the dynamic threshold but can be adjusted manually
+    voltage_threshold = st.slider(
+        "Set Voltage Threshold",
+        min_value=0.0,
+        max_value=300.0,
+        step=0.1,
+        value=float(dynamic_voltage_value)
+    )
+    st.write(f"Dynamic Voltage Threshold (mean + 2 * std): {dynamic_voltage_value:.2f} V")
 
-# ----------------- WEATHER API INTEGRATION ----------------- #
+    # Check if Voltage exceeds threshold at any point in the dataset
+    if df["Voltage"].max() > voltage_threshold:
+        st.warning("Voltage exceeded threshold!")
+else:
+    st.error("Voltage column not found in dataset.")
+
+# Weather API Integration for multiple cities
 st.markdown("### Weather Data")
 cities = {
     "Zrenjanin, Serbia": {"latitude": 45.3755, "longitude": 20.4020},
@@ -101,15 +109,18 @@ cities = {
 
 try:
     weather_data_list = []
+    
+    # Fetch weather data for each city
     for city, coords in cities.items():
         latitude = coords["latitude"]
         longitude = coords["longitude"]
+        
         weather = requests.get(
             f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m"
         ).json()
 
         if "hourly" in weather and "temperature_2m" in weather["hourly"]:
-            temperatures = weather["hourly"]["temperature_2m"][:5]
+            temperatures = weather["hourly"]["temperature_2m"][:5]  # Get first 5 hourly readings
             if temperatures:
                 for temp in temperatures:
                     weather_data_list.append({
@@ -128,7 +139,7 @@ try:
 except Exception as e:
     st.error(f"Unable to fetch weather data: {e}")
 
-# ----------------- REAL-TIME PERFORMANCE MONITOR ----------------- #
+# Real-time Monitoring for CPU, RAM, Disk
 st.markdown("### Performance Monitor")
 perf_col1, perf_col2, perf_col3 = st.columns(3)
 perf_col1.subheader("CPU Usage")
@@ -140,6 +151,7 @@ memory_chart = perf_col2.line_chart({"Memory Usage": []})
 perf_col3.subheader("Disk Usage")
 disk_chart = perf_col3.line_chart({"Disk Usage": []})
 
+# System performance overview
 with st.expander("System performance overview"):
     cpu_usage = psutil.cpu_percent(interval=0.1)
     memory_info = psutil.virtual_memory()
@@ -156,6 +168,7 @@ with st.expander("System performance overview"):
     st.write(f"**Sent data:** {net_io.bytes_sent / (1024 ** 2):.2f} MB")
     st.write(f"**Data received:** {net_io.bytes_recv / (1024 ** 2):.2f} MB")
 
+# Real-time Updates for Charts
 def update_performance_metrics():
     cpu_chart.add_rows({"CPU Usage": [psutil.cpu_percent()]})
     memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
@@ -197,74 +210,25 @@ def update_real_time_charts(row):
     
     return updated_columns
 
-# ----------------- SET UP LIVE AUTOMATIC FEATURE OPTIMIZATION ----------------- #
-st.markdown("### Automatic Feature Optimization (Live)")
-numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-afo_placeholder = st.empty()
-target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
-k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
-df_live = pd.DataFrame(columns=df.columns)
-
-def automatic_feature_optimization(dataframe, target, k):
-    dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
-    if target not in dataframe_numeric.columns or dataframe_numeric.empty:
-        return None, None
-    X = dataframe_numeric.drop(columns=[target])
-    y = dataframe_numeric[target]
-    k = min(k, X.shape[1])
-    selector = SelectKBest(score_func=mutual_info_regression, k=k)
-    selector.fit(X, y)
-    scores = selector.scores_
-    feature_names = X.columns
-    result_df = pd.DataFrame({
-        "Feature": feature_names,
-        "Score": scores
-    }).sort_values(by="Score", ascending=False)
-    selected_features = result_df.head(k)["Feature"].tolist()
-    return result_df, selected_features
-
-# ----------------- REAL-TIME LOOP ----------------- #
+# Iteration through DataFrame rows for real-time updates
 all_updated_columns = {}
 for i, row in df.iterrows():
-    # Update the slider for each incoming voltage value (if present)
-    if "Voltage" in row:
-        with slider_placeholder.container():
-            st.slider(
-                "Voltage Threshold (Live)",
-                min_value=0.0,
-                max_value=300.0,
-                step=0.1,
-                value=float(row["Voltage"]),
-                key=f"voltage_slider_{i}"
-            )
-    
     update_performance_metrics()
     updated_columns = update_real_time_charts(row)
     all_updated_columns.update(updated_columns)
-    
-    # Append current row to live DataFrame for AFO using pd.concat instead of deprecated append
-    df_live = pd.concat([df_live, pd.DataFrame([row])], ignore_index=True)
-    # Update live AFO every 10 rows
-    if len(df_live) % 10 == 0:
-        result_df, selected_features = automatic_feature_optimization(df_live, target_column, k)
-        if result_df is not None:
-            with afo_placeholder.container():
-                st.markdown("#### Live Automatic Feature Optimization Results")
-                st.dataframe(result_df)
-                st.write("Selected Features:", selected_features)
-    
+
     if "Date" in row:
         YMDt.metric("Date", row["Date"])
     if "Time" in row:
         Tt.metric("Time", row["Time"])
-    
+
     time.sleep(0.1)
 
-# ----------------- DISPLAY UPDATED COLUMNS ----------------- #
+# Display updated columns with last known values
 try:
     initial_message.empty()
     with st.container():
-        col_updated.markdown("### Updated Columns with Last Known Values:")
+        updated_columns_header = col_updated.markdown("### Updated Columns with Last Known Values:")
         relevant_columns = [
             "Voltage", "Current", "Measured_Frequency", "Active_Power",
             "Reactive_Power", "Apperent_Power", "Phase_Voltage_Angle",
@@ -280,13 +244,14 @@ try:
 except Exception as e:
     st.error(f"An error occurred while displaying updated columns: {e}")
 
-# ----------------- HISTORIC DATA ANALYSIS ----------------- #
+# Historic Data Analysis
 st.markdown("### Historic Data Analysis")
 df['Time'] = pd.to_datetime(df['Time'], errors='coerce').dt.time
 start_time = st.time_input("Start Time", value=df["Time"].min())
 end_time = st.time_input("End Time", value=df["Time"].max())
 df_filtered = df[(df["Time"] >= start_time) & (df["Time"] <= end_time)]
 
+# Display historical data charts
 chart_col1, chart_col2 = st.columns(2)
 chart_col1.subheader("Voltage [V] and Current")
 chart_col1.line_chart(df_filtered[["Voltage", "Current"]])
@@ -297,5 +262,41 @@ chart_col2.line_chart(df_filtered[["Active_Power", "Reactive_Power", "Apperent_P
 st.markdown("### Summary of Selected Data Range")
 st.write(df_filtered.describe())
 
+# Display filtered data
 st.write("Filtered Data:")
 st.dataframe(df_filtered)
+
+# Automatic Feature Optimization Section
+st.markdown("### Automatic Feature Optimization")
+numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+if numeric_columns:
+    target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
+    k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
+    
+    def automatic_feature_optimization(dataframe, target, k):
+        dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
+        if target not in dataframe_numeric.columns:
+            st.error("Target column must be numeric for optimization.")
+            return None, None
+        X = dataframe_numeric.drop(columns=[target])
+        y = dataframe_numeric[target]
+        k = min(k, X.shape[1])
+        selector = SelectKBest(score_func=mutual_info_regression, k=k)
+        selector.fit(X, y)
+        scores = selector.scores_
+        feature_names = X.columns
+        result_df = pd.DataFrame({
+            "Feature": feature_names,
+            "Score": scores
+        }).sort_values(by="Score", ascending=False)
+        selected_features = result_df.head(k)["Feature"].tolist()
+        return result_df, selected_features
+    
+    result_df, selected_features = automatic_feature_optimization(df, target_column, k)
+    if result_df is not None:
+        st.write("Feature scores for all numeric columns:")
+        st.dataframe(result_df)
+        st.write("Selected Features:")
+        st.write(selected_features)
+else:
+    st.warning("No numeric columns available for optimization.")
