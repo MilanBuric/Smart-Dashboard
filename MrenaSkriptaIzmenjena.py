@@ -1,89 +1,122 @@
 import streamlit as st
 import time
-import numpy as np
 import pandas as pd
+import requests
+import psutil
+from sklearn.feature_selection import SelectKBest, mutual_info_regression
 
-st.set_page_config(
-    page_title='Live DashBoard',
-    layout="wide",
-)
+# ----------------- CONFIG ----------------- #
+st.set_page_config(page_title='Smart Dashboard', layout="wide")
 
-df = pd.read_csv("demo_data.csv")
+# ----------------- FUNCTIONS ----------------- #
+@st.cache_data
+def load_data(file_path):
+    return pd.read_csv(file_path)
 
-col1, col2, col3 = st.columns(3)
+def calculate_dynamic_threshold(series, factor=2.0):
+    return series.mean() + factor * series.std()
 
-with col1:
-    st.subheader("Voltage[V] and Current\n")
-    Voltage = st.line_chart()
+def fetch_weather(city_coords):
+    results = []
+    for city, coords in city_coords.items():
+        try:
+            url = f"https://api.open-meteo.com/v1/forecast?latitude={coords['latitude']}&longitude={coords['longitude']}&hourly=temperature_2m"
+            response = requests.get(url).json()
+            temps = response.get("hourly", {}).get("temperature_2m", [])[:5]
+            for temp in temps:
+                results.append({"Location": city, "Temperature (°C)": round(temp)})
+        except:
+            results.append({"Location": city, "Temperature (°C)": "Error"})
+    return pd.DataFrame(results)
 
-with col2:
-    st.subheader("Frequency\n")
-    Freq = st.line_chart()
+def automatic_feature_optimization(df, target, k):
+    num_df = df.select_dtypes(include=['number'])
+    if target not in num_df or num_df.shape[0] < 2:
+        return None, None
+    X, y = num_df.drop(columns=target), num_df[target]
+    k = min(k, X.shape[1])
+    selector = SelectKBest(score_func=mutual_info_regression, k=k)
+    selector.fit(X, y)
+    scores = pd.DataFrame({
+        "Feature": X.columns,
+        "Score": selector.scores_
+    }).sort_values(by="Score", ascending=False)
+    return scores, scores["Feature"].head(k).tolist()
 
-with col3:
-    st.subheader("Power Data\n")
-    AP = st.line_chart()
+def update_system_metrics():
+    return {
+        "cpu": psutil.cpu_percent(),
+        "memory": psutil.virtual_memory().percent,
+        "disk": psutil.disk_usage('/').percent
+    }
 
-col4, col5, col6 = st.columns(3)
+# ----------------- LOAD DATA ----------------- #
+try:
+    df = load_data("demo_data.csv")
+except Exception as e:
+    st.error(f"Could not load dataset: {e}")
+    st.stop()
 
-with col4:
-    st.subheader("Angle Data\n")
-    PA = st.line_chart()
+# ----------------- UI ELEMENTS ----------------- #
+cols = st.columns(6)
+Voltage_chart = cols[0].line_chart()
+Freq_chart = cols[1].line_chart()
+Power_chart = cols[2].line_chart()
+PA_chart = cols[3].line_chart()
+CP_chart = cols[4].line_chart()
+PF_chart = cols[5].line_chart()
 
-with col5:
-    st.subheader("Cos Phi Data\n")
-    CP = st.line_chart()
+# ----------------- WEATHER ----------------- #
+st.markdown("### Weather Data")
+weather_df = fetch_weather({
+    "Zrenjanin, Serbia": {"latitude": 45.3755, "longitude": 20.4020},
+    "Belgrade, Serbia": {"latitude": 44.8176, "longitude": 20.4633},
+    "Novi Sad, Serbia": {"latitude": 45.2671, "longitude": 19.8335}
+})
+st.dataframe(weather_df)
 
-with col6:
-    st.subheader("Power Factor Data\n")
-    PF = st.line_chart()
+# ----------------- FEATURE SELECTION ----------------- #
+numeric_columns = df.select_dtypes(include='number').columns.tolist()
+if numeric_columns:
+    st.markdown("### Feature Optimization")
+    target_column = st.selectbox("Target:", numeric_columns)
+    k_val = st.slider("Select K features", 1, len(numeric_columns)-1, 3)
+else:
+    st.warning("No numeric data found.")
+    st.stop()
 
-isim = ":"
-col7 = st.columns(1)[0]
-col7.write(f"Experiment Data \n {isim}")
-YMDt = col7.empty()
-Tt = col7.empty()
+afo_placeholder = st.empty()
 
-for i in range(len(df)):
-    buff = df.iloc[i]
-
-    with Tt:
-        st.metric("Date", buff[0])
-    with YMDt:
-        st.metric("Time", buff[1])
+# ----------------- MONITOR & LIVE LOOP ----------------- #
+df_live = pd.DataFrame(columns=df.columns)
+for i, row in df.iterrows():
+    # Real-time data visualization updates
+    if i % 5 == 0:
+        Voltage_chart.add_rows({"Voltage": [row.get("Voltage", None)], "Current": [row.get("Current", None)]})
+        Freq_chart.add_rows({"Measured_Frequency": [row.get("Measured_Frequency", None)]})
+        Power_chart.add_rows({
+            "Active_Power": [row.get("Active_Power", None)],
+            "Reactive_Power": [row.get("Reactive_Power", None)],
+            "Apperent_Power": [row.get("Apperent_Power", None)]
+        })
+        PA_chart.add_rows({"Phase_Voltage_Angle": [row.get("Phase_Voltage_Angle", None)]})
+        CP_chart.add_rows({"Cos_Phi": [row.get("Cos_Phi", None)]})
+        PF_chart.add_rows({"Power_Factor": [row.get("Power_Factor", None)]})
     
-    Frequency_data = {
-        "Measured Frequency": float(buff[10])
-    }
-    Freq.add_rows([Frequency_data])
-    
-    voltage_data = {
-        "Voltage": float(buff[8]),
-        "Current": float(buff[9])
-    }
-    Voltage.add_rows([voltage_data])
+    # Real-time system performance
+    if i % 10 == 0:
+        metrics = update_system_metrics()
+        st.sidebar.metric("CPU Usage", f"{metrics['cpu']}%")
+        st.sidebar.metric("Memory Usage", f"{metrics['memory']}%")
+        st.sidebar.metric("Disk Usage", f"{metrics['disk']}%")
 
-    Power_data = {
-        "Active Power": float(buff[10]),
-        "Reactive Power": float(buff[11]),
-        "Apparent Power": float(buff[12]),
-    } 
-    AP.add_rows([Power_data])
+    # Real-time feature optimization
+    df_live = pd.concat([df_live, pd.DataFrame([row])], ignore_index=True)
+    if len(df_live) % 10 == 0:
+        result_df, selected_features = automatic_feature_optimization(df_live, target_column, k_val)
+        if result_df is not None:
+            with afo_placeholder.container():
+                st.markdown("#### Selected Features")
+                st.dataframe(result_df)
 
-    Phase_Angle_data = {
-        "Phase Voltage Angle": float(buff[13]),
-        "Reactive Current Power": float(buff[14])
-    }
-    PA.add_rows([Phase_Angle_data])
-
-    COS_PHI_data = {
-        "COS PHI": float(buff[15])
-    }
-    CP.add_rows([COS_PHI_data])
-
-    Power_Factor_data = {
-        "COS PHI": float(buff[16])
-    }
-    PF.add_rows([Power_Factor_data])
-    
-    time.sleep(0.2)
+    time.sleep(0.1)  # optional to simulate real-time streaming

@@ -198,7 +198,7 @@ def update_real_time_charts(row):
     return updated_columns
 
 # ----------------- SET UP LIVE AUTOMATIC FEATURE OPTIMIZATION ----------------- #
-st.markdown("### Automatic Feature Optimization (Live)")
+st.markdown("### Automatic Optimization (Live)")
 numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
 afo_placeholder = st.empty()
 target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
@@ -249,7 +249,7 @@ for i, row in df.iterrows():
         result_df, selected_features = automatic_feature_optimization(df_live, target_column, k)
         if result_df is not None:
             with afo_placeholder.container():
-                st.markdown("#### Live Automatic Feature Optimization Results")
+                st.markdown("#### Live Automatic Optimization Results")
                 st.dataframe(result_df)
                 st.write("Selected Features:", selected_features)
     
