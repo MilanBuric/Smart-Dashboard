@@ -23,12 +23,10 @@ RELEVANT_COLUMNS = [
 
 # ----------------- HELPER FUNCTIONS ----------------- #
 
-# Calculate dynamic threshold
 def calculate_dynamic_threshold(series, factor=2.0):
     """Calculate a dynamic threshold for a given pandas Series."""
     return series.mean() + factor * series.std()
 
-# Load data with caching
 @st.cache_data
 def load_data(file_path):
     """Load data from a CSV file."""
@@ -43,7 +41,6 @@ def load_data(file_path):
         st.error(f"An error occurred while loading the data: {e}")
         return None
 
-# ----------------- STREAMLIT APP ----------------- #
 def initialize_ui():
     """Initialize the Streamlit UI components."""
     st.set_page_config(page_title='Smart Dashboard', layout="wide")
@@ -90,7 +87,6 @@ def initialize_ui():
 
     return charts, perf_charts, metrics_placeholders
 
-# ----------------- MAIN LOGIC ----------------- #
 def display_static_info(df):
     """Display static information like dataset columns and filters."""
     col_dataset, col_updated = st.columns(2)
@@ -118,7 +114,6 @@ def display_voltage_threshold_info(df):
         st.error("No 'Voltage' column found in dataset. Slider won't update.")
     return slider_placeholder
 
-# Fetch weather data
 def fetch_weather_data(cities):
     """Fetch and display weather data from Open-Meteo API."""
     st.markdown("### Weather Data")
@@ -147,7 +142,6 @@ def fetch_weather_data(cities):
     except Exception as e:
         st.error(f"An error occurred while processing weather data: {e}")
 
-# Display system performance
 def display_system_performance():
     """Display a detailed system performance overview in an expander."""
     with st.expander("System performance overview"):
@@ -166,7 +160,6 @@ def display_system_performance():
         st.write(f"**Sent data:** {net_io.bytes_sent / (1024 ** 2):.2f} MB")
         st.write(f"**Data received:** {net_io.bytes_recv / (1024 ** 2):.2f} MB")
 
-# Update performance charts
 def update_performance_charts(perf_charts):
     """Update the real-time performance charts."""
     perf_charts["cpu"].add_rows({"CPU Usage": [psutil.cpu_percent()]})
@@ -191,7 +184,6 @@ def update_real_time_charts(charts, row):
     
     return updated_columns
 
-# Automatic Feature Optimization (AFO)
 def automatic_feature_optimization(dataframe, target, k):
     """Perform automatic feature optimization using SelectKBest."""
     dataframe_numeric = dataframe.select_dtypes(include=['number'])
@@ -234,7 +226,6 @@ def display_historical_data(df):
     start_time = st.time_input("Start Time", value=min_time)
     end_time = st.time_input("End Time", value=max_time)
 
-# Ensure start_time is before end_time if not swap them
     if start_time and end_time:
         df_filtered = df[(df["Time"] >= start_time) & (df["Time"] <= end_time)]
 
