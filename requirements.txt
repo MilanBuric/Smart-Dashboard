@@ -4,3 +4,4 @@ requests
 psutil
 reportlab
 scikit-learn
+plotly
