@@ -31,24 +31,81 @@ class DataPreprocessor:
         return outliers, lower_bound, upper_bound
     
     @staticmethod
+    def check_missing_values(df, columns):
+        """Check which columns actually have missing values"""
+        missing_report = {}
+        for col in columns:
+            if col in df.columns:
+                missing_count = df[col].isna().sum()
+                missing_pct = (missing_count / len(df)) * 100
+                missing_report[col] = {
+                    "missing_count": missing_count,
+                    "missing_percentage": missing_pct,
+                    "has_missing": missing_count > 0
+                }
+        return missing_report
+    
+    @staticmethod
     def interpolate_missing_values(df, columns, method='linear', order=2):
         """Fill missing values using interpolation"""
         df_processed = df.copy()
         for col in columns:
             if col in df_processed.columns:
-                if method in ['polynomial', 'spline']:
-                    df_processed[col] = df_processed[col].interpolate(method=method, order=order, limit_direction='both')
-                else:
-                    df_processed[col] = df_processed[col].interpolate(method=method, limit_direction='both')
+                try:
+                    if method in ['polynomial', 'spline']:
+                        df_processed[col] = df_processed[col].interpolate(method=method, order=order, limit_direction='both')
+                    else:
+                        df_processed[col] = df_processed[col].interpolate(method=method, limit_direction='both')
+                except Exception as e:
+                    print(f"Warning: Could not interpolate {col}: {e}")
         return df_processed
     
     @staticmethod
-    def normalize_data(df, columns):
-        """Normalize data to 0-1 range"""
+    def normalize_data(df, columns, method='standard'):
+        """Normalize data using different methods"""
         df_normalized = df.copy()
-        scaler = StandardScaler()
-        df_normalized[columns] = scaler.fit_transform(df[columns])
-        return df_normalized, scaler
+        
+        if method == 'standard':  # (x - mean) / std
+            scaler = StandardScaler()
+            df_normalized[columns] = scaler.fit_transform(df[columns])
+        
+        elif method == 'minmax':  # (x - min) / (max - min) -> [0, 1]
+            for col in columns:
+                min_val = df[col].min()
+                max_val = df[col].max()
+                if max_val - min_val != 0:
+                    df_normalized[col] = (df[col] - min_val) / (max_val - min_val)
+                else:
+                    df_normalized[col] = 0  # Ako nema varijacije, ostavi 0
+        
+        elif method == 'robust':  # (x - median) / IQR -> otporno na outliere
+            for col in columns:
+                Q1 = df[col].quantile(0.25)
+                Q3 = df[col].quantile(0.75)
+                IQR = Q3 - Q1
+                median = df[col].median()
+                if IQR != 0:
+                    df_normalized[col] = (df[col] - median) / IQR
+                else:
+                    df_normalized[col] = 0
+        
+        elif method == 'log':  # Log transformacija (za pozitivne vrednosti)
+            for col in columns:
+                if (df[col] > 0).all():
+                    df_normalized[col] = np.log(df[col])
+                else:
+                    st.warning(f"Column {col} has non-positive values. Cannot apply log transformation.")
+        
+        elif method == 'zscore':  # Z-score normalizacija
+            for col in columns:
+                mean = df[col].mean()
+                std = df[col].std()
+                if std != 0:
+                    df_normalized[col] = (df[col] - mean) / std
+                else:
+                    df_normalized[col] = 0
+        
+        return df_normalized
     
     @staticmethod
     def detect_anomalies(df, column, window=5, threshold=2):
@@ -226,23 +283,26 @@ def display_hypothesis_h(df):
             threshold = st.slider("Threshold:", 0.5, 5.0, 1.5)
             
             if st.button("Detect Outliers"):
-                outliers, lower, upper = preprocessor.detect_and_handle_outliers(
-                    df, selected_col, 
-                    method='iqr' if method == "IQR" else 'zscore', 
-                    threshold=threshold
-                )
-                st.write(f"**Found {len(outliers)} outliers**")
-                st.write(f"Expected range: [{lower:.2f}, {upper:.2f}]")
-                if len(outliers) > 0:
-                    st.dataframe(outliers[[selected_col, "Time"]].head(10))
-                else:
-                    st.success("✅ No outliers detected!")
+                try:
+                    outliers, lower, upper = preprocessor.detect_and_handle_outliers(
+                        df, selected_col, 
+                        method='iqr' if method == "IQR" else 'zscore', 
+                        threshold=threshold
+                    )
+                    st.write(f"**Found {len(outliers)} outliers**")
+                    st.write(f"Expected range: [{lower:.2f}, {upper:.2f}]")
+                    if len(outliers) > 0:
+                        st.dataframe(outliers[[selected_col, "Time"]].head(10))
+                    else:
+                        st.success("✅ No outliers detected!")
+                except Exception as e:
+                    st.error(f"Error during outlier detection: {e}")
         
         with tab2:
             st.subheader("Missing Values Interpolation")
             method = st.selectbox("Interpolation method:", ["linear", "polynomial", "spline"])
             
-            # Show order slider only for polynomial/spline
+            # Slider za order SAMO za polynomial/spline
             order = 2
             if method in ["polynomial", "spline"]:
                 order = st.slider("Interpolation order:", 1, 5, 2)
@@ -251,6 +311,25 @@ def display_hypothesis_h(df):
                 "Select columns:", 
                 [col for col in RELEVANT_COLUMNS if col in df.columns]
             )
+            
+            # Prvo prikaži koliko nedostajecih vrednosti ima
+            if st.button("Check Missing Values First"):
+                if columns_to_interpolate:
+                    missing_report = preprocessor.check_missing_values(df, columns_to_interpolate)
+                    
+                    st.subheader("Missing Values Report:")
+                    report_data = []
+                    for col, metrics in missing_report.items():
+                        report_data.append({
+                            "Column": col,
+                            "Missing Count": metrics['missing_count'],
+                            "Missing %": f"{metrics['missing_percentage']:.2f}%",
+                            "Has Missing": "✅ Yes" if metrics['has_missing'] else "❌ No"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(report_data))
+                else:
+                    st.warning("Please select at least one column")
             
             if st.button("Interpolate Missing Values"):
                 if columns_to_interpolate:
@@ -271,6 +350,14 @@ def display_hypothesis_h(df):
         
         with tab3:
             st.subheader("Data Normalization")
+            
+            # Odabir metode normalizacije
+            norm_method = st.selectbox(
+                "Select normalization method:",
+                ["standard", "minmax", "robust", "log", "zscore"],
+                help="Standard: StandardScaler | MinMax: [0,1] range | Robust: otporno na outliere | Log: log(x) | ZScore: Z-score"
+            )
+            
             columns_to_normalize = st.multiselect(
                 "Select columns to normalize:", 
                 [col for col in RELEVANT_COLUMNS if col in df.columns],
@@ -280,17 +367,24 @@ def display_hypothesis_h(df):
             if st.button("Normalize Data"):
                 if columns_to_normalize:
                     try:
-                        df_normalized, scaler = preprocessor.normalize_data(
-                            df, columns_to_normalize
+                        df_normalized = preprocessor.normalize_data(
+                            df, columns_to_normalize, method=norm_method
                         )
-                        st.success("✅ Normalization complete!")
+                        st.success(f"✅ {norm_method.upper()} Normalization complete!")
+                        
                         col1, col2 = st.columns(2)
                         with col1:
                             st.write("**Original Data (sample)**")
                             st.dataframe(df[columns_to_normalize].head())
+                            st.write("**Original Statistics:**")
+                            st.dataframe(df[columns_to_normalize].describe())
+                        
                         with col2:
                             st.write("**Normalized Data (sample)**")
                             st.dataframe(df_normalized[columns_to_normalize].head())
+                            st.write("**Normalized Statistics:**")
+                            st.dataframe(df_normalized[columns_to_normalize].describe())
+                            
                     except Exception as e:
                         st.error(f"Error during normalization: {e}")
                 else:
@@ -505,7 +599,7 @@ def main():
         **H - Data Preprocessing**: AI-powered data cleaning and preparation
         - Outlier detection (IQR & Z-score methods)
         - Missing value interpolation
-        - Data normalization
+        - Data normalization (5 different methods)
         - Anomaly detection
         
         **H1 - Element Verification**: Verification of control panel elements
