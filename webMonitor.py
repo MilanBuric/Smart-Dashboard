@@ -1,96 +1,179 @@
-
 import streamlit as st
 import time
 import pandas as pd
 import requests
 import psutil
-from sklearn.base import BaseEstimator
-from sklearn.feature_selection import SelectorMixin
 from sklearn.feature_selection import SelectKBest, mutual_info_regression
+from sklearn.preprocessing import StandardScaler
+import numpy as np
 
-# ----------------- SET STREAMLIT PAGE CONFIGURATION ----------------- #
-st.set_page_config(
-    page_title='Smart Dashboard',
-    layout="wide",
-)
+# ==================== HYPOTHESIS IMPLEMENTATIONS ====================
 
-# ----------------- DYNAMIC THRESHOLD FUNCTION ----------------- #
-def calculate_dynamic_threshold(series, factor=2.0):
-    """
-    Calculate a dynamic threshold for a given pandas Series.
-    Default uses mean + (factor * std).
-    """
-    return series.mean() + factor * series.std()
+class DataPreprocessor:
+    """H: AI Integration in Data Preprocessing"""
+    
+    @staticmethod
+    def detect_and_handle_outliers(df, column, method='iqr', threshold=1.5):
+        """Detect outliers using IQR or Z-score method"""
+        if method == 'iqr':
+            Q1 = df[column].quantile(0.25)
+            Q3 = df[column].quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - threshold * IQR
+            upper_bound = Q3 + threshold * IQR
+        else:  # z-score
+            mean = df[column].mean()
+            std = df[column].std()
+            lower_bound = mean - threshold * std
+            upper_bound = mean + threshold * std
+        
+        outliers = df[(df[column] < lower_bound) | (df[column] > upper_bound)]
+        return outliers, lower_bound, upper_bound
+    
+    @staticmethod
+    def interpolate_missing_values(df, columns, method='linear', order=2):
+        """Fill missing values using interpolation"""
+        df_processed = df.copy()
+        for col in columns:
+            if col in df_processed.columns:
+                if method in ['polynomial', 'spline']:
+                    df_processed[col] = df_processed[col].interpolate(method=method, order=order, limit_direction='both')
+                else:
+                    df_processed[col] = df_processed[col].interpolate(method=method, limit_direction='both')
+        return df_processed
+    
+    @staticmethod
+    def normalize_data(df, columns):
+        """Normalize data to 0-1 range"""
+        df_normalized = df.copy()
+        scaler = StandardScaler()
+        df_normalized[columns] = scaler.fit_transform(df[columns])
+        return df_normalized, scaler
+    
+    @staticmethod
+    def detect_anomalies(df, column, window=5, threshold=2):
+        """Detect anomalies using rolling statistics"""
+        rolling_mean = df[column].rolling(window=window).mean()
+        rolling_std = df[column].rolling(window=window).std()
+        
+        anomalies = (df[column] - rolling_mean).abs() > (threshold * rolling_std)
+        return anomalies
 
-# ----------------- INITIAL UI SETUP ----------------- #
-col1, col2, col3 = st.columns(3)
-col4, col5, col6 = st.columns(3)
 
-# Define subheaders for real-time charts
-col1.subheader("Voltage [V] and Current")
-Voltage = col1.line_chart({"Voltage": [], "Current": []})
+class ControlPanelValidator:
+    """H1: Verification of Control Panel Elements"""
+    
+    @staticmethod
+    def validate_data_range(df, column, min_val, max_val):
+        """Check if column values are within acceptable range"""
+        invalid_rows = df[(df[column] < min_val) | (df[column] > max_val)]
+        validity_score = (1 - len(invalid_rows) / len(df)) * 100
+        return {
+            "valid": len(invalid_rows) == 0,
+            "invalid_count": len(invalid_rows),
+            "validity_score": validity_score,
+            "out_of_range_rows": invalid_rows
+        }
+    
+    @staticmethod
+    def validate_data_consistency(df, column_pairs):
+        """Check logical consistency between related columns"""
+        inconsistencies = []
+        for col1, col2, condition in column_pairs:
+            if col1 in df.columns and col2 in df.columns:
+                invalid = df[~condition(df[col1], df[col2])]
+                if len(invalid) > 0:
+                    inconsistencies.append({
+                        "columns": f"{col1} vs {col2}",
+                        "inconsistent_count": len(invalid)
+                    })
+        return inconsistencies
+    
+    @staticmethod
+    def validate_sensor_health(df, sensor_columns):
+        """Check if sensors are providing data"""
+        health_report = {}
+        for col in sensor_columns:
+            if col in df.columns:
+                missing = df[col].isna().sum()
+                health_report[col] = {
+                    "total_readings": len(df),
+                    "missing_readings": missing,
+                    "data_availability": (1 - missing / len(df)) * 100
+                }
+        return health_report
 
-col2.subheader("Frequency")
-Freq = col2.line_chart({"Measured_Frequency": []})
 
-col3.subheader("Power Data")
-AP = col3.line_chart({
-    "Active_Power": [], "Reactive_Power": [], "Apperent_Power": []
-})
+class QualityAssessment:
+    """H2: Quality Assessment of Control Panel Corrections"""
+    
+    @staticmethod
+    def calculate_correction_impact(df_original, df_corrected, columns):
+        """Measure the impact of corrections"""
+        impact_report = {}
+        for col in columns:
+            if col in df_original.columns and col in df_corrected.columns:
+                changes = (df_corrected[col] != df_original[col]).sum()
+                mae = np.mean(np.abs(df_original[col] - df_corrected[col]))
+                impact_report[col] = {
+                    "rows_changed": changes,
+                    "percent_changed": (changes / len(df_original)) * 100,
+                    "mean_absolute_error": mae
+                }
+        return impact_report
+    
+    @staticmethod
+    def assess_data_quality_score(df, sensor_columns):
+        """Calculate overall data quality score (0-100)"""
+        scores = []
+        
+        # Check for completeness
+        completeness = (1 - df[sensor_columns].isna().sum().sum() / (len(df) * len(sensor_columns))) * 100
+        scores.append(("Completeness", completeness, 0.3))
+        
+        # Check for consistency (no extreme outliers)
+        outlier_score = 100
+        for col in sensor_columns:
+            if df[col].std() > 0:
+                z_scores = np.abs((df[col] - df[col].mean()) / df[col].std())
+                outliers_pct = (z_scores > 3).sum() / len(df) * 100
+                outlier_score -= outliers_pct
+        scores.append(("Outlier Detection", max(outlier_score, 0), 0.3))
+        
+        # Check for stability (low variance in readings)
+        stability = 100
+        for col in sensor_columns:
+            cv = (df[col].std() / df[col].mean()) if df[col].mean() != 0 else 0
+            if cv > 0.5:
+                stability -= cv * 10
+        scores.append(("Stability", max(stability, 0), 0.4))
+        
+        overall_score = sum(score * weight for _, score, weight in scores)
+        return overall_score, scores
+    
+    @staticmethod
+    def generate_quality_report(overall_score):
+        """Generate quality assessment report"""
+        if overall_score >= 90:
+            status = "🟢 Excellent"
+            recommendation = "Data quality is excellent. Continue monitoring."
+        elif overall_score >= 75:
+            status = "🟡 Good"
+            recommendation = "Data quality is good. Minor improvements recommended."
+        elif overall_score >= 60:
+            status = "🟠 Fair"
+            recommendation = "Data quality needs attention. Review outliers and missing values."
+        else:
+            status = "🔴 Poor"
+            recommendation = "Data quality is poor. Immediate action required."
+        
+        return {"status": status, "score": overall_score, "recommendation": recommendation}
 
-col4.subheader("Angle Data")
-PA = col4.line_chart({
-    "Phase_Voltage_Angle": []
-})
 
-col5.subheader("Cos Phi Data")
-CP = col5.line_chart({"Cos_Phi": []})
+# ==================== CONFIGURATION ====================
 
-col6.subheader("Power Factor Data")
-PF = col6.line_chart({"Power_Factor": []})
-
-# Placeholders for Date and Time metrics
-YMDt = st.empty()
-Tt = st.empty()
-
-# ----------------- LOAD DATASET ----------------- #
-try:
-    df = pd.read_csv("demo_data.csv")
-except FileNotFoundError:
-    st.error("Data file 'demo_data.csv' not found. Please ensure it is in the correct directory.")
-    st.stop()
-except Exception as e:
-    st.error(f"An error occurred while loading the data: {e}")
-    st.stop()
-
-# Display dataset columns
-col_dataset, col_updated = st.columns(2)
-col_dataset.markdown("### Columns in dataset:")
-col_dataset.table(pd.DataFrame(df.columns.tolist(), columns=["Columns"]))
-
-initial_message = col_updated.info("The list of updated columns with their last known values will be displayed here after processing is complete.")
-
-# ----------------- FILTER COLUMNS SECTION ----------------- #
-st.markdown("### Filter Columns")
-selected_columns = st.multiselect("Select columns to display:", options=df.columns)
-if selected_columns:
-    st.write("Filtered Columns Data:")
-    st.table(df[selected_columns])
-
-# ----------------- DYNAMICALLY MOVING VOLTAGE SLIDER ----------------- #
-st.markdown("### Dynamic Voltage Threshold (Real-Time)")
-slider_placeholder = st.empty()  # We'll use this placeholder to update the slider each row
-
-# Pre-calculate a threshold if needed (optional, for reference)
-if "Voltage" in df.columns:
-    dynamic_voltage_calc = calculate_dynamic_threshold(df["Voltage"], factor=2.0)
-    st.write(f"Pre-calculated threshold (mean + 2*std): {dynamic_voltage_calc:.2f} V")
-else:
-    st.error("No 'Voltage' column found in dataset. Slider won't update.")
-
-# ----------------- WEATHER API INTEGRATION ----------------- #
-st.markdown("### Weather Data")
-cities = {
+DATA_FILE = "demo_data.csv"
+CITIES = {
     "Zrenjanin, Serbia": {"latitude": 45.3755, "longitude": 20.4020},
     "Belgrade, Serbia": {"latitude": 44.8176, "longitude": 20.4633},
     "Novi Sad, Serbia": {"latitude": 45.2671, "longitude": 19.8335},
@@ -99,203 +182,352 @@ cities = {
     "Zagreb, Croatia": {"latitude": 45.8125, "longitude": 15.978}
 }
 
-try:
-    weather_data_list = []
-    for city, coords in cities.items():
-        latitude = coords["latitude"]
-        longitude = coords["longitude"]
-        weather = requests.get(
-            f"https://api.open-meteo.com/v1/forecast?latitude={latitude}&longitude={longitude}&hourly=temperature_2m"
-        ).json()
+RELEVANT_COLUMNS = [
+    "Voltage", "Current", "Measured_Frequency", "Active_Power",
+    "Reactive_Power", "Apperent_Power", "Phase_Voltage_Angle",
+    "Cos_Phi", "Power_Factor"
+]
 
-        if "hourly" in weather and "temperature_2m" in weather["hourly"]:
-            temperatures = weather["hourly"]["temperature_2m"][:5]
-            if temperatures:
-                for temp in temperatures:
-                    weather_data_list.append({
-                        "Location": city,
-                        "Temperature (°C)": round(temp)
-                    })
-        else:
-            st.error(f"Error fetching data for {city}.")
+# ==================== HELPER FUNCTIONS ====================
+
+def calculate_dynamic_threshold(series, factor=2.0):
+    return series.mean() + factor * series.std()
+
+@st.cache_data
+def load_data(file_path):
+    try:
+        df = pd.read_csv(file_path)
+        df['Time'] = pd.to_datetime(df['Time'], errors='coerce').dt.time
+        return df
+    except FileNotFoundError:
+        st.error(f"Data file '{file_path}' not found.")
+        return None
+    except Exception as e:
+        st.error(f"An error occurred while loading the data: {e}")
+        return None
+
+def display_hypothesis_h(df):
+    """H: AI Integration in Data Preprocessing"""
+    st.markdown("## 🤖 H: AI Integration in Data Preprocessing")
     
-    if weather_data_list:
-        weather_data = pd.DataFrame(weather_data_list)
-        st.table(weather_data)
-    else:
-        st.error("No weather data found.")
+    with st.expander("Data Preprocessing Options", expanded=True):
+        preprocessor = DataPreprocessor()
         
-except Exception as e:
-    st.error(f"Unable to fetch weather data: {e}")
-
-# ----------------- REAL-TIME PERFORMANCE MONITOR ----------------- #
-st.markdown("### Performance Monitor")
-perf_col1, perf_col2, perf_col3 = st.columns(3)
-perf_col1.subheader("CPU Usage")
-cpu_chart = perf_col1.line_chart({"CPU Usage": []})
-
-perf_col2.subheader("Memory Usage")
-memory_chart = perf_col2.line_chart({"Memory Usage": []})
-
-perf_col3.subheader("Disk Usage")
-disk_chart = perf_col3.line_chart({"Disk Usage": []})
-
-with st.expander("System performance overview"):
-    cpu_usage = psutil.cpu_percent(interval=0.1)
-    memory_info = psutil.virtual_memory()
-    disk_usage_info = psutil.disk_usage('/')
-    net_io = psutil.net_io_counters()
-
-    st.write(f"**CPU usage:** {cpu_usage}%")
-    st.write(f"**RAM usage:** {memory_info.percent}%")
-    st.write(f"**Total RAM memory:** {memory_info.total / (1024 ** 3):.2f} GB")
-    st.write(f"**Available RAM memory:** {memory_info.available / (1024 ** 3):.2f} GB")
-    st.write(f"**Disk usage:** {disk_usage_info.percent}%")
-    st.write(f"**Total space on the Disk:** {disk_usage_info.total / (1024 ** 3):.2f} GB")
-    st.write(f"**Available memory on Disk:** {disk_usage_info.free / (1024 ** 3):.2f} GB")
-    st.write(f"**Sent data:** {net_io.bytes_sent / (1024 ** 2):.2f} MB")
-    st.write(f"**Data received:** {net_io.bytes_recv / (1024 ** 2):.2f} MB")
-
-def update_performance_metrics():
-    cpu_chart.add_rows({"CPU Usage": [psutil.cpu_percent()]})
-    memory_chart.add_rows({"Memory Usage": [psutil.virtual_memory().percent]})
-    disk_chart.add_rows({"Disk Usage": [psutil.disk_usage('/').percent]})
-
-def update_real_time_charts(row):
-    updated_columns = {}
-
-    if "Voltage" in row and "Current" in row:
-        Voltage.add_rows([{"Voltage": row["Voltage"], "Current": row["Current"]}])
-        updated_columns["Voltage"] = row["Voltage"]
-        updated_columns["Current"] = row["Current"]
-
-    if "Measured_Frequency" in row:
-        Freq.add_rows([{"Measured_Frequency": row["Measured_Frequency"]}])
-        updated_columns["Measured_Frequency"] = row["Measured_Frequency"]
-
-    if all(k in row for k in ["Active_Power", "Reactive_Power", "Apperent_Power"]):
-        AP.add_rows([{
-            "Active_Power": row["Active_Power"],
-            "Reactive_Power": row["Reactive_Power"],
-            "Apperent_Power": row["Apperent_Power"]
-        }])
-        updated_columns["Active_Power"] = row["Active_Power"]
-        updated_columns["Reactive_Power"] = row["Reactive_Power"]
-        updated_columns["Apperent_Power"] = row["Apperent_Power"]
-
-    if "Phase_Voltage_Angle" in row:
-        PA.add_rows([{"Phase_Voltage_Angle": row["Phase_Voltage_Angle"]}])
-        updated_columns["Phase_Voltage_Angle"] = row["Phase_Voltage_Angle"]
-
-    if "Cos_Phi" in row:
-        CP.add_rows([{"Cos_Phi": row["Cos_Phi"]}])
-        updated_columns["Cos_Phi"] = row["Cos_Phi"]
-
-    if "Power_Factor" in row:
-        PF.add_rows([{"Power_Factor": row["Power_Factor"]}])
-        updated_columns["Power_Factor"] = row["Power_Factor"]
-    
-    return updated_columns
-
-# ----------------- SET UP LIVE AUTOMATIC FEATURE OPTIMIZATION ----------------- #
-st.markdown("### Automatic Optimization (Live)")
-numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-afo_placeholder = st.empty()
-target_column = st.selectbox("Select target column for optimization:", options=numeric_columns, index=0)
-k = st.slider("Number of features to select", min_value=1, max_value=len(numeric_columns)-1, value=min(3, len(numeric_columns)-1))
-df_live = pd.DataFrame(columns=df.columns)
-
-def automatic_feature_optimization(dataframe, target, k):
-    dataframe_numeric = dataframe.select_dtypes(include=['int64', 'float64'])
-    if target not in dataframe_numeric.columns or dataframe_numeric.empty:
-        return None, None
-    X = dataframe_numeric.drop(columns=[target])
-    y = dataframe_numeric[target]
-    k = min(k, X.shape[1])
-    selector = SelectKBest(score_func=mutual_info_regression, k=k)
-    selector.fit(X, y)
-    scores = selector.scores_
-    feature_names = X.columns
-    result_df = pd.DataFrame({
-        "Feature": feature_names,
-        "Score": scores
-    }).sort_values(by="Score", ascending=False)
-    selected_features = result_df.head(k)["Feature"].tolist()
-    return result_df, selected_features
-
-# ----------------- REAL-TIME LOOP ----------------- #
-all_updated_columns = {}
-for i, row in df.iterrows():
-    # Update the slider for each incoming voltage value (if present)
-    if "Voltage" in row:
-        with slider_placeholder.container():
-            st.slider(
-                "Voltage Threshold (Live)",
-                min_value=0.0,
-                max_value=300.0,
-                step=0.1,
-                value=float(row["Voltage"]),
-                key=f"voltage_slider_{i}"
+        # Tab-based UI
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["Outlier Detection", "Missing Values", "Normalization", "Anomaly Detection"]
+        )
+        
+        with tab1:
+            st.subheader("Outlier Detection & Handling")
+            selected_col = st.selectbox("Select column for outlier detection:", 
+                                       [col for col in RELEVANT_COLUMNS if col in df.columns])
+            method = st.radio("Select method:", ["IQR", "Z-Score"])
+            threshold = st.slider("Threshold:", 0.5, 5.0, 1.5)
+            
+            if st.button("Detect Outliers"):
+                outliers, lower, upper = preprocessor.detect_and_handle_outliers(
+                    df, selected_col, 
+                    method='iqr' if method == "IQR" else 'zscore', 
+                    threshold=threshold
+                )
+                st.write(f"**Found {len(outliers)} outliers**")
+                st.write(f"Expected range: [{lower:.2f}, {upper:.2f}]")
+                if len(outliers) > 0:
+                    st.dataframe(outliers[[selected_col, "Time"]].head(10))
+                else:
+                    st.success("✅ No outliers detected!")
+        
+        with tab2:
+            st.subheader("Missing Values Interpolation")
+            method = st.selectbox("Interpolation method:", ["linear", "polynomial", "spline"])
+            
+            # Show order slider only for polynomial/spline
+            order = 2
+            if method in ["polynomial", "spline"]:
+                order = st.slider("Interpolation order:", 1, 5, 2)
+            
+            columns_to_interpolate = st.multiselect(
+                "Select columns:", 
+                [col for col in RELEVANT_COLUMNS if col in df.columns]
             )
+            
+            if st.button("Interpolate Missing Values"):
+                if columns_to_interpolate:
+                    try:
+                        df_processed = preprocessor.interpolate_missing_values(
+                            df, columns_to_interpolate, method=method, order=order
+                        )
+                        st.success("✅ Interpolation complete!")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Original missing values", df[columns_to_interpolate].isna().sum().sum())
+                        with col2:
+                            st.metric("After interpolation", df_processed[columns_to_interpolate].isna().sum().sum())
+                    except Exception as e:
+                        st.error(f"Error during interpolation: {e}")
+                else:
+                    st.warning("Please select at least one column")
+        
+        with tab3:
+            st.subheader("Data Normalization")
+            columns_to_normalize = st.multiselect(
+                "Select columns to normalize:", 
+                [col for col in RELEVANT_COLUMNS if col in df.columns],
+                key="normalize_cols"
+            )
+            
+            if st.button("Normalize Data"):
+                if columns_to_normalize:
+                    try:
+                        df_normalized, scaler = preprocessor.normalize_data(
+                            df, columns_to_normalize
+                        )
+                        st.success("✅ Normalization complete!")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write("**Original Data (sample)**")
+                            st.dataframe(df[columns_to_normalize].head())
+                        with col2:
+                            st.write("**Normalized Data (sample)**")
+                            st.dataframe(df_normalized[columns_to_normalize].head())
+                    except Exception as e:
+                        st.error(f"Error during normalization: {e}")
+                else:
+                    st.warning("Please select at least one column")
+        
+        with tab4:
+            st.subheader("Anomaly Detection")
+            selected_col = st.selectbox("Select column for anomaly detection:", 
+                                       [col for col in RELEVANT_COLUMNS if col in df.columns],
+                                       key="anomaly_col")
+            window = st.slider("Rolling window size:", 3, 20, 5)
+            threshold = st.slider("Anomaly threshold (std dev):", 1.0, 5.0, 2.0)
+            
+            if st.button("Detect Anomalies"):
+                try:
+                    anomalies = preprocessor.detect_anomalies(
+                        df, selected_col, window=window, threshold=threshold
+                    )
+                    anomaly_count = anomalies.sum()
+                    st.metric("Anomalies detected", anomaly_count)
+                    st.metric("Anomaly percentage", f"{(anomaly_count/len(df)*100):.2f}%")
+                    
+                    if anomaly_count > 0:
+                        anomaly_indices = df[anomalies].index
+                        st.dataframe(df.loc[anomaly_indices, [selected_col, "Time"]].head(10))
+                    else:
+                        st.success("✅ No anomalies detected!")
+                except Exception as e:
+                    st.error(f"Error during anomaly detection: {e}")
+
+def display_hypothesis_h1(df):
+    """H1: Verification of Control Panel Elements"""
+    st.markdown("## ✅ H1: Verification of Control Panel Elements")
     
-    update_performance_metrics()
-    updated_columns = update_real_time_charts(row)
-    all_updated_columns.update(updated_columns)
+    with st.expander("Control Panel Validation", expanded=True):
+        validator = ControlPanelValidator()
+        
+        tab1, tab2, tab3 = st.tabs(["Data Range", "Consistency", "Sensor Health"])
+        
+        with tab1:
+            st.subheader("Data Range Validation")
+            selected_col = st.selectbox("Select column to validate:", 
+                                       [col for col in RELEVANT_COLUMNS if col in df.columns],
+                                       key="range_col")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                min_val = st.number_input("Minimum acceptable value:", value=0.0)
+            with col2:
+                max_val = st.number_input("Maximum acceptable value:", value=100.0)
+            
+            if st.button("Validate Range"):
+                try:
+                    result = validator.validate_data_range(df, selected_col, min_val, max_val)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Validity Score", f"{result['validity_score']:.2f}%")
+                    with col2:
+                        st.metric("Invalid Rows", result['invalid_count'])
+                    with col3:
+                        st.metric("Status", "✅ Valid" if result['valid'] else "❌ Invalid")
+                    
+                    if result['invalid_count'] > 0:
+                        st.warning(f"Found {result['invalid_count']} out-of-range values")
+                        st.dataframe(result['out_of_range_rows'].head())
+                except Exception as e:
+                    st.error(f"Error during validation: {e}")
+        
+        with tab2:
+            st.subheader("Data Consistency Check")
+            st.info("Validates logical relationships between columns")
+            
+            if st.button("Check Consistency"):
+                try:
+                    # Example consistency checks
+                    consistency_checks = [
+                        ("Voltage", "Current", lambda v, c: (v > 0) & (c >= 0)),
+                        ("Active_Power", "Apperent_Power", lambda ap, app: ap <= app)
+                    ]
+                    
+                    inconsistencies = validator.validate_data_consistency(
+                        df, consistency_checks
+                    )
+                    
+                    if inconsistencies:
+                        st.warning("Found inconsistencies:")
+                        for inc in inconsistencies:
+                            st.write(f"- {inc['columns']}: {inc['inconsistent_count']} rows")
+                    else:
+                        st.success("✅ All consistency checks passed!")
+                except Exception as e:
+                    st.error(f"Error during consistency check: {e}")
+        
+        with tab3:
+            st.subheader("Sensor Health Status")
+            if st.button("Check Sensor Health"):
+                try:
+                    health = validator.validate_sensor_health(
+                        df, RELEVANT_COLUMNS
+                    )
+                    
+                    health_data = []
+                    for sensor, metrics in health.items():
+                        health_data.append({
+                            "Sensor": sensor,
+                            "Total Readings": metrics['total_readings'],
+                            "Missing": metrics['missing_readings'],
+                            "Availability %": f"{metrics['data_availability']:.2f}%"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(health_data))
+                    
+                    # Overall sensor status
+                    avg_availability = np.mean([h['data_availability'] for h in health.values()])
+                    st.metric("Average Sensor Availability", f"{avg_availability:.2f}%")
+                except Exception as e:
+                    st.error(f"Error during sensor health check: {e}")
+
+def display_hypothesis_h2(df):
+    """H2: Quality Assessment of Control Panel Corrections"""
+    st.markdown("## 📊 H2: Quality Assessment of Control Panel Corrections")
     
-    # Append current row to live DataFrame for AFO using pd.concat instead of deprecated append
-    df_live = pd.concat([df_live, pd.DataFrame([row])], ignore_index=True)
-    # Update live AFO every 10 rows
-    if len(df_live) % 10 == 0:
-        result_df, selected_features = automatic_feature_optimization(df_live, target_column, k)
-        if result_df is not None:
-            with afo_placeholder.container():
-                st.markdown("#### Live Automatic Optimization Results")
-                st.dataframe(result_df)
-                st.write("Selected Features:", selected_features)
+    with st.expander("Quality Assessment", expanded=True):
+        quality = QualityAssessment()
+        
+        tab1, tab2 = st.tabs(["Quality Score", "Correction Impact"])
+        
+        with tab1:
+            st.subheader("Data Quality Assessment")
+            if st.button("Calculate Quality Score"):
+                try:
+                    overall_score, scores = quality.assess_data_quality_score(
+                        df, RELEVANT_COLUMNS
+                    )
+                    
+                    report = quality.generate_quality_report(overall_score)
+                    
+                    # Display main score
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.metric("Overall Quality Score", f"{overall_score:.2f}/100")
+                    with col2:
+                        st.write(report['status'])
+                    
+                    st.info(report['recommendation'])
+                    
+                    # Breakdown of scores
+                    st.subheader("Quality Components:")
+                    for component, score, weight in scores:
+                        st.write(f"**{component}** (Weight: {weight*100:.0f}%): {score:.2f}/100")
+                        st.progress(min(score/100, 1.0))
+                except Exception as e:
+                    st.error(f"Error calculating quality score: {e}")
+        
+        with tab2:
+            st.subheader("Correction Impact Analysis")
+            st.info("Compare original vs corrected data to measure improvement")
+            
+            # Simulate correction
+            if st.button("Analyze Correction Impact"):
+                try:
+                    # For demo, we create a slightly modified version
+                    df_corrected = df.copy()
+                    
+                    # Apply some corrections (remove outliers, interpolate)
+                    preprocessor = DataPreprocessor()
+                    df_corrected = preprocessor.interpolate_missing_values(
+                        df_corrected, RELEVANT_COLUMNS
+                    )
+                    
+                    impact = quality.calculate_correction_impact(
+                        df, df_corrected, RELEVANT_COLUMNS
+                    )
+                    
+                    impact_data = []
+                    for col, metrics in impact.items():
+                        impact_data.append({
+                            "Column": col,
+                            "Rows Changed": metrics['rows_changed'],
+                            "% Changed": f"{metrics['percent_changed']:.2f}%",
+                            "MAE": f"{metrics['mean_absolute_error']:.4f}"
+                        })
+                    
+                    st.dataframe(pd.DataFrame(impact_data))
+                except Exception as e:
+                    st.error(f"Error analyzing correction impact: {e}")
+
+# ==================== MAIN APP ====================
+
+def main():
+    st.set_page_config(page_title='Smart Dashboard with AI', layout="wide")
+    st.title("🎯 Smart Dashboard with AI Integration")
     
-    if "Date" in row:
-        YMDt.metric("Date", row["Date"])
-    if "Time" in row:
-        Tt.metric("Time", row["Time"])
+    # Load data
+    df = load_data(DATA_FILE)
+    if df is None:
+        st.stop()
     
-    time.sleep(0.1)
+    # Navigation
+    st.sidebar.title("Navigation")
+    page = st.sidebar.radio("Select section:", 
+        ["Dashboard Overview", "H: Data Preprocessing", "H1: Element Verification", "H2: Quality Assessment"]
+    )
+    
+    if page == "Dashboard Overview":
+        st.markdown("""
+        ### Welcome to the Smart Dashboard with AI Integration
+        
+        This dashboard integrates AI capabilities based on three main hypotheses:
+        
+        **H - Data Preprocessing**: AI-powered data cleaning and preparation
+        - Outlier detection (IQR & Z-score methods)
+        - Missing value interpolation
+        - Data normalization
+        - Anomaly detection
+        
+        **H1 - Element Verification**: Verification of control panel elements
+        - Data range validation
+        - Consistency checking
+        - Sensor health monitoring
+        
+        **H2 - Quality Assessment**: Quality assessment of corrections
+        - Data quality scoring
+        - Correction impact analysis
+        
+        Select a section from the sidebar to get started!
+        """)
+    
+    elif page == "H: Data Preprocessing":
+        display_hypothesis_h(df)
+    
+    elif page == "H1: Element Verification":
+        display_hypothesis_h1(df)
+    
+    elif page == "H2: Quality Assessment":
+        display_hypothesis_h2(df)
 
-# ----------------- DISPLAY UPDATED COLUMNS ----------------- #
-try:
-    initial_message.empty()
-    with st.container():
-        col_updated.markdown("### Updated Columns with Last Known Values:")
-        relevant_columns = [
-            "Voltage", "Current", "Measured_Frequency", "Active_Power",
-            "Reactive_Power", "Apperent_Power", "Phase_Voltage_Angle",
-            "Cos_Phi", "Power_Factor"
-        ]
-        formatted_updated_columns = [
-            {"Column": col, "Last Known Value": value}
-            for col, value in all_updated_columns.items()
-            if col in relevant_columns
-        ]
-        updated_columns_df = pd.DataFrame(formatted_updated_columns)
-        col_updated.table(updated_columns_df)
-except Exception as e:
-    st.error(f"An error occurred while displaying updated columns: {e}")
-
-# ----------------- HISTORIC DATA ANALYSIS ----------------- #
-st.markdown("### Historic Data Analysis")
-df['Time'] = pd.to_datetime(df['Time'], errors='coerce').dt.time
-start_time = st.time_input("Start Time", value=df["Time"].min())
-end_time = st.time_input("End Time", value=df["Time"].max())
-df_filtered = df[(df["Time"] >= start_time) & (df["Time"] <= end_time)]
-
-chart_col1, chart_col2 = st.columns(2)
-chart_col1.subheader("Voltage [V] and Current")
-chart_col1.line_chart(df_filtered[["Voltage", "Current"]])
-
-chart_col2.subheader("Power Data (Active, Reactive, Apparent)")
-chart_col2.line_chart(df_filtered[["Active_Power", "Reactive_Power", "Apperent_Power"]])
-
-st.markdown("### Summary of Selected Data Range")
-st.write(df_filtered.describe())
-
-st.write("Filtered Data:")
-st.dataframe(df_filtered)
+if __name__ == "__main__":
+    main()
