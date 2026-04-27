@@ -1259,6 +1259,7 @@ def page_quality(df):
                         f"Weight: {weight*100:.0f}%</div>",
                         unsafe_allow_html=True)
 
+# --- Tab 2: Correction impact analysis ---
     with tab2:
         if st.button("Analyze Correction Impact", type="primary"):
             available    = [c for c in RELEVANT_COLUMNS if c in df.columns]
@@ -1280,7 +1281,7 @@ def page_quality(df):
 
 
 # ==================== MAIN ====================
-
+# The main function initializes the Streamlit app, loads data, and routes to the appropriate page based on user selection.
 def main():
     with st.sidebar:
         st.markdown(
