@@ -4,4 +4,4 @@ The system simulates live sensor data and provides interactive visualizations fo
 
 The project introduces a modular validation and quality assessment framework, evaluating data based on completeness, stability, and accuracy. The architecture is designed to be adaptable to multiple data sources, including CSV files, APIs, and industrial systems (e.g., SCADA/PLC).
 
- Live demo link: https://smart-dashboard-tematwebtest.streamlit.app
+ Live demo link: https://smart-dashboard-knwhrcpv9zoi7sg7pqzhpl.streamlit.app
