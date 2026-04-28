@@ -12,6 +12,7 @@ from sklearn.svm import OneClassSVM
 from sklearn.decomposition import PCA
 import numpy as np
 from datetime import datetime, timedelta
+from streamlit_autorefresh import st_autorefresh
 
 # ==================== PAGE CONFIG (must be first) ====================
 st.set_page_config(
