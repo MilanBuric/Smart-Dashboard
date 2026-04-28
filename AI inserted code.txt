@@ -319,11 +319,16 @@ class DataPreprocessor:
 
     @staticmethod
     def isolation_forest(df, columns, contamination=0.05, n_estimators=100):
+        """
+        Isolation Forest: unsupervised ML that isolates anomalies by
+        randomly partitioning the feature space. Anomalies require fewer
+        splits to isolate — shorter path → lower score.
+        """
         X      = df[columns].dropna()
         model  = IsolationForest(n_estimators=n_estimators,
                                   contamination=contamination, random_state=42)
-        preds  = model.fit_predict(X)
-        scores = model.score_samples(X)
+        preds  = model.fit_predict(X)         # -1 = anomaly
+        scores = model.score_samples(X)       # lower = more anomalous
         mask         = pd.Series(False, index=df.index)
         score_series = pd.Series(np.nan,  index=df.index)
         mask[X.index]         = preds == -1
@@ -332,6 +337,11 @@ class DataPreprocessor:
 
     @staticmethod
     def local_outlier_factor(df, columns, n_neighbors=20, contamination=0.05):
+        """
+        Local Outlier Factor: compares local density of each point to its
+        neighbours. Points in low-density regions relative to neighbours
+        are flagged as outliers.
+        """
         X      = df[columns].dropna()
         model  = LocalOutlierFactor(n_neighbors=n_neighbors,
                                      contamination=contamination)
@@ -345,6 +355,10 @@ class DataPreprocessor:
 
     @staticmethod
     def one_class_svm(df, columns, nu=0.05, kernel="rbf"):
+        """
+        One-Class SVM: learns a decision boundary in kernel space
+        around normal data. Points outside the boundary are anomalies.
+        """
         X        = df[columns].dropna()
         scaler   = StandardScaler()
         X_scaled = scaler.fit_transform(X)
@@ -359,6 +373,11 @@ class DataPreprocessor:
 
     @staticmethod
     def pca_reconstruction_error(df, columns, n_components=None, threshold_sigma=2.5):
+        """
+        PCA Reconstruction: learns principal components of normal operation.
+        High reconstruction error = anomaly — the point cannot be
+        represented by the normal-data components.
+        """
         X         = df[columns].dropna()
         scaler    = StandardScaler()
         X_scaled  = scaler.fit_transform(X)
@@ -378,6 +397,12 @@ class DataPreprocessor:
 # ==================== HYPOTHESIS H1: CONTROL PANEL VALIDATOR ====================
 
 class ControlPanelValidator:
+    """
+    Hypothesis H1: Verification of control panel elements.
+    Technology-agnostic: these rules apply to any data source —
+    CSV, PLC, SCADA, MQTT, REST API, etc.
+    """
+
     @staticmethod
     def validate_data_range(df, column, min_val, max_val):
         invalid_rows  = df[(df[column] < min_val) | (df[column] > max_val)]
@@ -419,6 +444,12 @@ class ControlPanelValidator:
 # ==================== HYPOTHESIS H2: QUALITY ASSESSMENT ====================
 
 class QualityAssessment:
+    """
+    Hypothesis H2: Quality assessment in correction of the control panel.
+    Technology-agnostic weighted scoring framework (Completeness,
+    Accuracy, Stability) applicable to any monitoring system.
+    """
+
     @staticmethod
     def calculate_correction_impact(df_original, df_corrected, columns):
         impact_report = {}
@@ -498,6 +529,7 @@ PLOTLY_LAYOUT = dict(
 
 # ==================== HELPERS ====================
 
+# How many rows the live chart window keeps
 LIVE_BUFFER_SIZE = 200
 
 def _make_synthetic_base():
@@ -525,31 +557,16 @@ def _make_synthetic_base():
 
 def load_data(file_path):
     """
-    Load fresh data from CSV every call.
+    Load fresh data from CSV every call — NO cache so charts always
+    reflect the latest rows written to disk.
     Falls back to synthetic data when the file is not found.
-
-    Handles two CSV layouts:
-      A) Single 'Time' column that already contains a full datetime string.
-      B) Separate 'Date' and 'Time' columns — combines them into one
-         'Time' column (datetime) so the rest of the app works unchanged.
-    Uses format='mixed' to avoid the dateutil UserWarning in all cases.
     """
     try:
         df = pd.read_csv(file_path)
-
-        if 'Date' in df.columns and 'Time' in df.columns:
-            # Layout B: combine Date + Time into a single datetime column
-            combined = df['Date'].astype(str).str.strip() + ' ' + df['Time'].astype(str).str.strip()
-            df['Time'] = pd.to_datetime(combined, format='mixed', dayfirst=True, errors='coerce')
-            df.drop(columns=['Date'], inplace=True)
-        elif 'Time' in df.columns:
-            # Layout A: Time column already holds full datetime strings
-            df['Time'] = pd.to_datetime(df['Time'], format='mixed', errors='coerce')
-        else:
-            st.warning("CSV has no 'Time' or 'Date' column — timestamps will be missing.")
-
+        df['Time'] = pd.to_datetime(df['Time'], errors='coerce')
         return df
     except FileNotFoundError:
+        # Return (or re-use) the synthetic base stored in session_state
         if "synthetic_base" not in st.session_state:
             st.session_state["synthetic_base"] = _make_synthetic_base()
         return st.session_state["synthetic_base"]
@@ -559,8 +576,12 @@ def load_data(file_path):
 
 
 def _new_live_row(base_row: pd.Series) -> pd.Series:
-    """Generate one new live reading by walking the last known values with a small random drift."""
+    """
+    Generate one new live reading by walking the last known values
+    with a small random drift — simulates a real sensor tick.
+    """
     row = base_row.copy()
+    # Each column drifts slightly from its previous value
     drifts = {
         "Voltage":             np.random.normal(0, 0.4),
         "Current":             np.random.normal(0, 0.08),
@@ -575,6 +596,7 @@ def _new_live_row(base_row: pd.Series) -> pd.Series:
     for col, drift in drifts.items():
         if col in row.index:
             row[col] = float(row[col]) + drift
+    # Clamp reasonable bounds so the simulation stays physical
     row["Voltage"]            = np.clip(row["Voltage"],            180, 280)
     row["Current"]            = np.clip(row["Current"],              0,  30)
     row["Measured_Frequency"] = np.clip(row["Measured_Frequency"],  49,  51)
@@ -587,47 +609,31 @@ def _new_live_row(base_row: pd.Series) -> pd.Series:
 def get_live_df(base_df: pd.DataFrame) -> pd.DataFrame:
     """
     Maintain a rolling buffer in session_state.
-
-    Every rerun unconditionally appends one synthetic tick (random drift
-    from the last row) so KPIs and charts always receive a new data point.
-    If the source CSV has genuinely new rows since the last check, those
-    are ingested instead so real sensor data always takes priority.
-
-    Root-cause of the old bug: the previous version compared the buffer's
-    last timestamp (which drifted into the future via synthetic ticks) to
-    the CSV's last timestamp. This made the "new CSV rows" branch always
-    evaluate to True, but base_df[base_df["Time"] > buf_last_time]
-    returned zero rows because the buffer was already ahead of the CSV,
-    silently killing all updates after the very first rerun.
-    Fixed by tracking csv_last_seen separately in session_state so the
-    two clocks never interfere.
+    On every call: append one new simulated row (or the latest CSV row),
+    then trim to LIVE_BUFFER_SIZE so the chart window scrolls forward.
+    When reading from a real CSV, the buffer grows as new rows are written.
     """
-    # Initialise buffer + CSV cursor on very first run
+    # Initialise buffer from the base dataset on first run
     if "live_buffer" not in st.session_state:
-        st.session_state["live_buffer"] = (
-            base_df.tail(LIVE_BUFFER_SIZE).copy().reset_index(drop=True)
-        )
-        st.session_state["csv_last_seen"] = (
-            base_df["Time"].iloc[-1] if "Time" in base_df.columns else None
-        )
+        st.session_state["live_buffer"] = base_df.tail(LIVE_BUFFER_SIZE).copy().reset_index(drop=True)
 
-    buf           = st.session_state["live_buffer"]
-    csv_last_seen = st.session_state.get("csv_last_seen")
-    ingested_real = False
+    buf: pd.DataFrame = st.session_state["live_buffer"]
 
-    # Ingest genuinely new CSV rows if any have arrived
-    if "Time" in base_df.columns and csv_last_seen is not None:
-        new_rows = base_df[base_df["Time"] > csv_last_seen]
-        if len(new_rows) > 0:
+    # --- Real CSV path: check whether new rows have arrived ---
+    csv_last_time = base_df["Time"].iloc[-1] if "Time" in base_df.columns else None
+    buf_last_time = buf["Time"].iloc[-1]     if "Time" in buf.columns     else None
+
+    if csv_last_time is not None and csv_last_time != buf_last_time:
+        # New rows exist in the CSV — append them
+        new_rows = base_df[base_df["Time"] > buf_last_time]
+        if len(new_rows):
             buf = pd.concat([buf, new_rows], ignore_index=True)
-            st.session_state["csv_last_seen"] = base_df["Time"].iloc[-1]
-            ingested_real = True
-
-    # Always produce a synthetic tick when no real data arrived
-    if not ingested_real:
+    else:
+        # Synthetic / no new CSV rows — generate one simulated tick
         new_row = _new_live_row(buf.iloc[-1])
         buf = pd.concat([buf, pd.DataFrame([new_row])], ignore_index=True)
 
+    # Keep only the latest LIVE_BUFFER_SIZE rows (scrolling window)
     buf = buf.tail(LIVE_BUFFER_SIZE).reset_index(drop=True)
     st.session_state["live_buffer"] = buf
     return buf
@@ -658,26 +664,12 @@ def status_badge(status, label):
 # ==================== DASHBOARD PAGES ====================
 
 def page_realtime(df):
-    # -------------------------------------------------------
-    # FIX 3: Use st_autorefresh instead of time.sleep+st.rerun
-    # The checkbox controls whether the timer is active.
-    # st_autorefresh fires a full re-run from the browser every
-    # 3 000 ms without blocking Streamlit's server thread.
-    # -------------------------------------------------------
-    col_title, col_status, col_refresh = st.columns([3, 2, 1])
-    with col_refresh:
-        auto_refresh = st.checkbox("Auto-refresh", value=False)
-
-    # Place the autorefresh call BEFORE rendering any data so the
-    # very first re-run already has fresh values in the buffer.
-    if auto_refresh:
-        st_autorefresh(interval=3000, limit=None, key="live_refresh")
-
     # Build / extend the rolling live buffer — this is what every chart reads
     live_df = get_live_df(df)
-    reading = live_df.iloc[-1]
+    reading = live_df.iloc[-1]                           # latest row
     prev    = live_df.iloc[-2] if len(live_df) > 1 else reading
 
+    col_title, col_status, col_refresh = st.columns([3, 2, 1])
     with col_title:
         st.markdown("### Live Grid Monitor")
         st.markdown(
@@ -691,6 +683,8 @@ def page_realtime(df):
         s = "Online" if 210 <= v <= 250 else "Warning"
         st.markdown(status_badge(s, f"Grid {s}") + "&nbsp;&nbsp;" +
                     status_badge("Online", "Sensors OK"), unsafe_allow_html=True)
+    with col_refresh:
+        auto_refresh = st.checkbox("Auto-refresh", value=False)
 
     st.markdown("<div class='section-header'>Key Performance Indicators</div>", unsafe_allow_html=True)
 
@@ -722,6 +716,7 @@ def page_realtime(df):
     chart_col1, chart_col2 = st.columns([3, 2])
 
     with chart_col1:
+        # ---- Uses live_df — scrolls forward every refresh ----
         window = live_df.tail(120)
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         fig.add_trace(go.Scatter(x=window["Time"], y=window["Voltage"],
@@ -741,6 +736,7 @@ def page_realtime(df):
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
     with chart_col2:
+        # ---- Gauge reads the live latest value ----
         pf_val = float(reading.get("Power_Factor", 0.95))
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number+delta",
@@ -767,6 +763,7 @@ def page_realtime(df):
     chart_col3, chart_col4, chart_col5 = st.columns([2, 2, 1])
 
     with chart_col3:
+        # ---- Power components — live_df ----
         window = live_df.tail(80)
         fig2   = go.Figure()
         for col, color, label in [
@@ -783,6 +780,7 @@ def page_realtime(df):
         st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
     with chart_col4:
+        # ---- Frequency — live_df ----
         window = live_df.tail(100)
         fig3   = go.Figure()
         fig3.add_hrect(y0=49.8, y1=50.2, fillcolor="rgba(16,185,129,0.08)", line_width=0)
@@ -797,6 +795,7 @@ def page_realtime(df):
         st.plotly_chart(fig3, use_container_width=True, config={"displayModeBar": False})
 
     with chart_col5:
+        # ---- Live sensor values — latest reading ----
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         st.markdown("<div class='section-header'>Live Sensors</div>", unsafe_allow_html=True)
         for col in RELEVANT_COLUMNS[:7]:
@@ -823,6 +822,7 @@ def page_realtime(df):
     if pf < 0.9:
         alerts.append(("warning", f"Low power factor: {pf:.3f} - Consider reactive power compensation"))
 
+    # Run anomaly detection on the live buffer
     anomaly_mask  = DataPreprocessor.detect_anomalies(live_df, "Voltage", window=10, threshold=2.5)
     anomaly_count = int(anomaly_mask.sum()) if anomaly_mask is not None else 0
     if anomaly_count > 0:
@@ -836,8 +836,9 @@ def page_realtime(df):
         with cols_alert[i % 3]:
             st.markdown(f"<div class='alert-item {alert_colors.get(level, '')}'>{msg}</div>",
                         unsafe_allow_html=True)
-
-    # NOTE: time.sleep + st.rerun removed entirely — st_autorefresh above handles this cleanly.
+    if auto_refresh:
+        time.sleep(3)
+        st.rerun()
 
 
 def page_analysis(df):
@@ -883,6 +884,7 @@ def page_analysis(df):
         available = [c for c in RELEVANT_COLUMNS if c in df.columns]
         stats     = df[available].describe().T
         stats["cv%"] = (stats["std"] / stats["mean"] * 100).round(2)
+        # Plain dataframe — no matplotlib dependency
         st.dataframe(stats, use_container_width=True)
 
 
@@ -908,6 +910,7 @@ def page_preprocessing(df):
         "🤖 ML Anomaly Detection", "🤖 PCA Reconstruction"
     ])
 
+    # ---- Tab 1: Classical outlier detection ----
     with tab1:
         st.markdown("<div class='section-header'>Statistical Outlier Detection (Baseline)</div>",
                     unsafe_allow_html=True)
@@ -934,6 +937,7 @@ def page_preprocessing(df):
             fig_out.update_layout(title=f"Outlier Detection: {selected_col}", height=350, **PLOTLY_LAYOUT)
             st.plotly_chart(fig_out, use_container_width=True, config={"displayModeBar": False})
 
+    # ---- Tab 2: Missing values ----
     with tab2:
         st.markdown("<div class='section-header'>Missing Value Interpolation</div>", unsafe_allow_html=True)
         interp_method = st.selectbox("Method:", ["linear", "polynomial", "spline"])
@@ -957,6 +961,7 @@ def page_preprocessing(df):
                 st.metric("Missing After",  int(df_proc[cols_to_interp].isna().sum().sum()))
                 st.success("Interpolation complete.")
 
+    # ---- Tab 3: Normalization ----
     with tab3:
         st.markdown("<div class='section-header'>Data Normalization</div>", unsafe_allow_html=True)
         norm_method  = st.selectbox("Method:", ["standard", "minmax", "robust", "log", "zscore"])
@@ -980,6 +985,7 @@ def page_preprocessing(df):
                 fig_n.update_layout(title=f"Normalization Effect: {col_show}", height=300, **PLOTLY_LAYOUT)
                 st.plotly_chart(fig_n, use_container_width=True, config={"displayModeBar": False})
 
+    # ---- Tab 4: ML anomaly detection ----
     with tab4:
         st.markdown(
             "<div class='section-header'>ML Anomaly Detection "
@@ -1034,6 +1040,7 @@ def page_preprocessing(df):
             fig_ml.update_layout(title=f"{ml_method} — {plot_col}", height=350, **PLOTLY_LAYOUT)
             st.plotly_chart(fig_ml, use_container_width=True, config={"displayModeBar": False})
 
+            # Score distribution
             valid_scores = scores.dropna()
             fig2 = go.Figure()
             fig2.add_trace(go.Histogram(x=valid_scores[~mask[valid_scores.index]],
@@ -1043,6 +1050,7 @@ def page_preprocessing(df):
             fig2.update_layout(title=score_label, barmode="overlay", height=280, **PLOTLY_LAYOUT)
             st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
+    # ---- Tab 5: PCA reconstruction ----
     with tab5:
         st.markdown(
             "<div class='section-header'>PCA Reconstruction Error "
@@ -1252,6 +1260,7 @@ def page_quality(df):
                         f"Weight: {weight*100:.0f}%</div>",
                         unsafe_allow_html=True)
 
+# --- Tab 2: Correction impact analysis ---
     with tab2:
         if st.button("Analyze Correction Impact", type="primary"):
             available    = [c for c in RELEVANT_COLUMNS if c in df.columns]
@@ -1273,7 +1282,7 @@ def page_quality(df):
 
 
 # ==================== MAIN ====================
-
+# The main function initializes the Streamlit app, loads data, and routes to the appropriate page based on user selection.
 def main():
     with st.sidebar:
         st.markdown(
@@ -1284,10 +1293,8 @@ def main():
             "</div>",
             unsafe_allow_html=True)
         st.markdown("<div class='section-header'>Navigation</div>", unsafe_allow_html=True)
-
-        # FIX 1: provide a non-empty label and hide it with label_visibility
         page = st.radio(
-            label="Navigation",
+            label="",
             options=["Live Monitor", "Historical Analysis", "H: Preprocessing",
                      "H1: Validation", "H2: Quality"],
             label_visibility="collapsed")
@@ -1312,7 +1319,7 @@ def main():
     if df is None:
         st.stop()
 
-    if page == "Live Monitor":          page_realtime(df)
+    if page == "Live Monitor":        page_realtime(df)
     elif page == "Historical Analysis": page_analysis(df)
     elif page == "H: Preprocessing":   page_preprocessing(df)
     elif page == "H1: Validation":     page_validation(df)
