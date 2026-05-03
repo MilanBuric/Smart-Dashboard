@@ -220,7 +220,15 @@ st.markdown("""
     ::-webkit-scrollbar-thumb { background: #1e2a3a; border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: #2d3f55; }
 
-    #MainMenu, footer, header { visibility: hidden; }
+    /* Hide Streamlit branding but preserve the header so the
+       sidebar toggle button stays visible and reachable */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+    /* Keep header visible but strip its background so it blends in */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+        box-shadow: none !important;
+    }
     .js-plotly-plot .plotly { background: transparent !important; }
 </style>
 """, unsafe_allow_html=True)
