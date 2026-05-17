@@ -1,6 +1,16 @@
 streamlit
+<<<<<<< HEAD
+=======
+streamlit-autorefresh
+>>>>>>> 3d53a3a92d8fb73126c0acc0aa6d9de963040f65
 pandas
 requests
 psutil
 reportlab
+<<<<<<< HEAD
 scikit-learn
+=======
+scikit-learn
+plotly
+matplotlib
+>>>>>>> 3d53a3a92d8fb73126c0acc0aa6d9de963040f65
