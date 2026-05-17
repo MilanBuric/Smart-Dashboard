@@ -1,0 +1,9 @@
+streamlit
+streamlit-autorefresh
+pandas
+requests
+psutil
+reportlab
+scikit-learn
+plotly
+matplotlib
