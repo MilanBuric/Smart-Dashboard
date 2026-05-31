@@ -1,1 +1,1 @@
-streamlit run webMonitor.py
+python -m streamlit run webMonitor.py
