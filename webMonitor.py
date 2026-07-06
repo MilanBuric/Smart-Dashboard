@@ -1823,7 +1823,8 @@ def page_validation(df):
                 marker_color=["#10b981" if a>=95 else "#f59e0b" if a>=80 else "#ef4444" for a in avail],
                 text=[f"{a:.1f}%" for a in avail], textposition="outside"))
             fig_health.update_layout(title="Sensor Data Availability (%)",
-                                     yaxis=dict(range=[0, 110]), height=350, **PLOTLY_LAYOUT)
+                                     height=350, **PLOTLY_LAYOUT)
+            fig_health.update_yaxes(range=[0, 110])
             st.plotly_chart(fig_health, use_container_width=True, config={"displayModeBar": False})
             st.metric("Average Availability", f"{np.mean(avail):.2f}%")
 
