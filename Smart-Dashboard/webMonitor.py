@@ -1506,7 +1506,7 @@ def page_preprocessing(df):
     preprocessor = DataPreprocessor()
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "Outlier Detection", "Missing Values", "Normalization",
-        "🤖 ML Anomaly Detection", "🤖 PCA Reconstruction"
+        "ML Anomaly Detection", "PCA Reconstruction"
     ])
 
     # ---- Tab 1: Classical outlier detection ----
