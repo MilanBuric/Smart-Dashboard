@@ -685,6 +685,50 @@ class DataPreprocessor:
         error_series[X.index] = errors
         return mask, error_series, threshold, pca.explained_variance_ratio_, pca
 
+    # -------------------------------------------------------------------------
+    # ANOMALY REMEDIATION
+    # Unlike the detection methods above (which only flag anomalies), this
+    # method actually corrects them — closing the gap between "detect" and
+    # "fix" in the preprocessing pipeline.
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def remediate_anomalies(df, columns, mask, method='interpolate'):
+        """
+        Corrects rows flagged as anomalous (by any of the detection methods
+        above) by treating them as missing values and filling the gap back in.
+
+        method='interpolate' — sets flagged cells to NaN, then linearly
+                                interpolates using neighbouring values
+                                (reuses the same approach as interpolate_missing_values).
+        method='median'      — sets flagged cells to NaN, then fills with the
+                                column's median computed from the ORIGINAL
+                                (uncorrected) data, so the anomalies themselves
+                                don't skew the replacement value.
+
+        `mask` is a boolean Series aligned to df's index (True = anomalous row),
+        as returned by isolation_forest, local_outlier_factor, one_class_svm,
+        pca_reconstruction_error, or detect_and_handle_outliers (converted to a mask).
+
+        Returns a NEW DataFrame — the original df is never modified.
+        """
+        df_clean = df.copy()
+        mask = mask.reindex(df_clean.index, fill_value=False).fillna(False)
+
+        for col in columns:
+            if col in df_clean.columns:
+                df_clean.loc[mask, col] = np.nan
+
+        if method == 'interpolate':
+            df_clean[columns] = df_clean[columns].interpolate(
+                method='linear', limit_direction='both')
+        elif method == 'median':
+            for col in columns:
+                if col in df_clean.columns:
+                    df_clean[col] = df_clean[col].fillna(df[col].median())
+
+        return df_clean
+
 
 # =============================================================================
 # CLASS: ControlPanelValidator  (Hypothesis H1)
@@ -1668,6 +1712,49 @@ def page_preprocessing(df):
                                          name="Anomaly", marker_color="#ef4444", opacity=0.7, nbinsx=20))
             fig2.update_layout(title=score_label, barmode="overlay", height=280, **PLOTLY_LAYOUT)
             st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+
+            # Persist the detection results in session_state so the "Correct Anomalies"
+            # button below (outside this `if`, so it survives the next rerun) can use them.
+            st.session_state["ml_last_mask"]   = mask
+            st.session_state["ml_last_cols"]   = ml_cols
+            st.session_state["ml_last_method"] = ml_method
+
+        # ---- Remediation: correct the anomalies flagged above ----
+        if "ml_last_mask" in st.session_state and st.session_state["ml_last_mask"].sum() > 0:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("<div class='section-header'>Anomaly Correction</div>", unsafe_allow_html=True)
+            fix_method = st.radio("Fix method:", ["interpolate", "median"], horizontal=True,
+                                   key="fix_method_choice")
+
+            if st.button("Correct Anomalies", type="primary"):
+                fix_mask   = st.session_state["ml_last_mask"]
+                fix_cols   = st.session_state["ml_last_cols"]
+                fix_method_used = st.session_state["ml_last_method"]
+                df_fixed   = preprocessor.remediate_anomalies(df, fix_cols, fix_mask, fix_method)
+
+                plot_col = fix_cols[0]
+                fig_fix  = go.Figure()
+                fig_fix.add_trace(go.Scatter(x=df.index, y=df[plot_col], mode="lines",
+                                              name="Original (with anomalies)",
+                                              line=dict(color="#ef4444", width=1.3)))
+                fig_fix.add_trace(go.Scatter(x=df_fixed.index, y=df_fixed[plot_col], mode="lines",
+                                              name="Corrected",
+                                              line=dict(color="#10b981", width=1.8)))
+                fig_fix.update_layout(
+                    title=f"Before / After Correction ({fix_method_used}) — {plot_col}",
+                    height=320, **PLOTLY_LAYOUT)
+                st.plotly_chart(fig_fix, use_container_width=True, config={"displayModeBar": False})
+
+                # Reuse the Hypothesis H2 impact calculator to quantify what changed
+                impact = QualityAssessment.calculate_correction_impact(df, df_fixed, fix_cols)
+                impact_data = pd.DataFrame([{
+                    "Column":       col,
+                    "Rows Changed": m["rows_changed"],
+                    "% Changed":    round(m["percent_changed"], 3),
+                    "MAE":          round(m["mean_absolute_error"], 6)
+                } for col, m in impact.items()])
+                st.dataframe(impact_data, use_container_width=True)
+                st.success(f"Corrected {int(fix_mask.sum())} anomalous rows across {len(fix_cols)} column(s).")
 
     # ---- Tab 5: PCA Reconstruction ----
     with tab5:
