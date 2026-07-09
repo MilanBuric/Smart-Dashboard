@@ -740,9 +740,13 @@ class DataPreprocessor:
 
 class ControlPanelValidator:
     """
-    Hypothesis H1: It is possible to verify the elements of a control panel.
-    Three verification dimensions: range compliance, logical consistency,
-    and sensor data availability.
+    Hypothesis H1: It is possible to verify the elements of a control panel,
+    including identifying which of its elements (sensor features) are most
+    diagnostically important by cross-referencing the results of independent
+    anomaly detection algorithms.
+
+    Four verification dimensions: range compliance, logical consistency,
+    sensor data availability, and cross-algorithm feature importance.
     """
 
     @staticmethod
@@ -816,6 +820,113 @@ class ControlPanelValidator:
                     "data_availability": (1 - missing / len(df)) * 100
                 }
         return health_report
+
+    # -------------------------------------------------------------------------
+    # CROSS-ALGORITHM FEATURE IMPORTANCE  (Hypothesis H1)
+    # This is the "izdvajanje najvažnijih svojstava ukrštanjem rezultata
+    # algoritama" (extraction of the most important features by crossing the
+    # results of multiple algorithms) part of Hypothesis H1.
+    #
+    # Three INDEPENDENT anomaly detectors (Isolation Forest, Local Outlier
+    # Factor, One-Class SVM) are each run separately on every single control
+    # panel feature. If a feature is genuinely informative/important, the
+    # three unrelated algorithms will tend to flag the SAME rows as anomalous
+    # on that feature — because there is a real signal to find. If a feature
+    # carries mostly noise, the three algorithms will disagree and flag
+    # largely different rows, since there is no shared pattern to detect.
+    #
+    # This lets us rank control panel elements by how strongly independent
+    # algorithms agree on them — i.e. by crossing/cross-referencing their
+    # results — rather than by an arbitrary manual choice.
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def cross_algorithm_feature_ranking(df, columns, contamination=0.05):
+        """
+        Ranks control panel features by cross-algorithm agreement.
+
+        For every column in `columns`:
+          1. Run Isolation Forest, Local Outlier Factor, and One-Class SVM,
+             each independently, using ONLY that single feature.
+          2. Build a boolean "flagged as anomalous" mask per algorithm.
+          3. Compute the pairwise Jaccard similarity between each pair of
+             masks (IF vs LOF, IF vs SVM, LOF vs SVM). Jaccard similarity =
+             (rows flagged by BOTH) / (rows flagged by EITHER). It is 1.0 when
+             two algorithms flag exactly the same rows, 0.0 when they share
+             no flagged rows at all.
+          4. cross_agreement_score = the mean of those three pairwise scores.
+             A high score means independent algorithms converge on the same
+             anomalous rows for that feature — i.e. the feature carries a
+             real, detectable signal and is diagnostically important.
+          5. consensus_anomalies = rows flagged by at least 2 of the 3
+             algorithms (majority vote) — the anomalies most likely to be real.
+
+        PARAMETERS:
+        columns       — candidate control panel features to rank.
+        contamination — expected fraction of anomalies, shared by IF/LOF/SVM
+                        so results are directly comparable across algorithms.
+
+        RETURNS:
+        A pandas DataFrame, one row per feature, sorted by
+        "Cross-Algorithm Agreement" descending (rank 1 = most important),
+        with columns: Feature, Importance Rank, Cross-Algorithm Agreement,
+        Consensus Anomalies, IF Count, LOF Count, SVM Count.
+        """
+
+        def _jaccard(mask_a, mask_b):
+            union = (mask_a | mask_b).sum()
+            return (mask_a & mask_b).sum() / union if union > 0 else 0.0
+
+        results = []
+        for col in columns:
+            if col not in df.columns:
+                continue
+
+            X   = df[[col]].dropna()
+            idx = X.index
+            if len(X) < 10:
+                continue   # Not enough data to meaningfully run three detectors
+
+            # --- Isolation Forest (tree-based, global) ---
+            if_model = IsolationForest(n_estimators=100, contamination=contamination, random_state=42)
+            if_pred  = if_model.fit_predict(X)
+            if_mask  = pd.Series(if_pred == -1, index=idx)
+
+            # --- Local Outlier Factor (density-based, local) ---
+            lof_model = LocalOutlierFactor(n_neighbors=min(20, len(X) - 1), contamination=contamination)
+            lof_pred  = lof_model.fit_predict(X)
+            lof_mask  = pd.Series(lof_pred == -1, index=idx)
+
+            # --- One-Class SVM (kernel boundary) ---
+            scaler   = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            svm_model = OneClassSVM(nu=contamination, kernel="rbf", gamma="scale")
+            svm_pred  = svm_model.fit_predict(X_scaled)
+            svm_mask  = pd.Series(svm_pred == -1, index=idx)
+
+            # --- Cross-reference the three independent results ---
+            j_if_lof  = _jaccard(if_mask, lof_mask)
+            j_if_svm  = _jaccard(if_mask, svm_mask)
+            j_lof_svm = _jaccard(lof_mask, svm_mask)
+            agreement = float(np.mean([j_if_lof, j_if_svm, j_lof_svm]))
+
+            vote_sum  = if_mask.astype(int) + lof_mask.astype(int) + svm_mask.astype(int)
+            consensus = int((vote_sum >= 2).sum())
+
+            results.append({
+                "Feature":                   col,
+                "Cross-Algorithm Agreement": agreement,
+                "Consensus Anomalies":       consensus,
+                "IF Count":                  int(if_mask.sum()),
+                "LOF Count":                 int(lof_mask.sum()),
+                "SVM Count":                 int(svm_mask.sum()),
+            })
+
+        ranking = pd.DataFrame(results)
+        if not ranking.empty:
+            ranking = ranking.sort_values("Cross-Algorithm Agreement", ascending=False).reset_index(drop=True)
+            ranking.insert(0, "Importance Rank", ranking.index + 1)
+        return ranking
 
 
 # =============================================================================
@@ -1824,23 +1935,31 @@ def page_preprocessing(df):
 
 def page_validation(df):
     """
-    Hypothesis H1 page — verifies control panel element correctness.
-    Three tabs: range validation, logical consistency checks, sensor health.
+    Hypothesis H1 page — verifies control panel element correctness AND
+    identifies the most important control panel elements by cross-referencing
+    the results of independent anomaly detection algorithms.
+    Four tabs: range validation, logical consistency checks, sensor health,
+    and cross-algorithm feature importance.
     """
     st.markdown("### Control Panel Validation  —  Hypothesis H1")
     st.markdown(
         "<div class='hypothesis-box'>"
         "<div class='hypothesis-title'>Hypothesis H1</div>"
         "<div class='hypothesis-text'>"
-        "It is possible to verify the elements of a control panel. "
-        "The methodology (range checking, logical consistency rules, sensor availability scoring) "
+        "It is possible to verify the elements of a control panel and to extract "
+        "the most important ones by cross-referencing the results of independent "
+        "algorithms. The methodology (range checking, logical consistency rules, "
+        "sensor availability scoring, and cross-algorithm agreement ranking) "
         "is technology-agnostic — the same approach works whether data comes from a CSV file, "
         "a PLC, SCADA, MQTT broker, or REST API."
         "</div></div>",
         unsafe_allow_html=True)
 
     validator = ControlPanelValidator()
-    tab1, tab2, tab3 = st.tabs(["Range Validation", "Consistency Check", "Sensor Health"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Range Validation", "Consistency Check", "Sensor Health",
+        "Feature Importance (Cross-Algorithm)"
+    ])
 
     with tab1:
         st.markdown("<div class='section-header'>Data Range Validation</div>", unsafe_allow_html=True)
@@ -1914,6 +2033,61 @@ def page_validation(df):
             fig_health.update_yaxes(range=[0, 110])
             st.plotly_chart(fig_health, use_container_width=True, config={"displayModeBar": False})
             st.metric("Average Availability", f"{np.mean(avail):.2f}%")
+
+    # ---- Tab 4: Cross-Algorithm Feature Importance ----
+    with tab4:
+        st.markdown(
+            "<div class='section-header'>Feature Importance via Cross-Algorithm Agreement "
+            "<span class='ml-badge'>AI</span></div>",
+            unsafe_allow_html=True)
+        st.markdown(
+            "<div style='font-size:0.8rem;color:#64748b;margin-bottom:1rem;'>"
+            "Isolation Forest, Local Outlier Factor, and One-Class SVM are each run "
+            "independently on every selected feature. Features where the three algorithms "
+            "consistently agree on which readings are anomalous carry a real, detectable "
+            "signal and are ranked as the most important control panel elements. Features "
+            "where the algorithms disagree are mostly noise.</div>",
+            unsafe_allow_html=True)
+
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            fi_cols = st.multiselect(
+                "Candidate features to rank:",
+                [c for c in RELEVANT_COLUMNS if c in df.columns],
+                default=[c for c in RELEVANT_COLUMNS if c in df.columns], key="fi_cols")
+        with c2:
+            fi_contamination = st.slider("Expected anomaly rate:", 0.01, 0.20, 0.05, 0.01,
+                                          key="fi_contamination")
+
+        if st.button("Run Cross-Algorithm Ranking", type="primary") and fi_cols:
+            with st.spinner("Cross-referencing IF / LOF / SVM results across features..."):
+                ranking = validator.cross_algorithm_feature_ranking(df, fi_cols, fi_contamination)
+
+            if ranking.empty:
+                st.warning("Not enough data to compute a ranking for the selected features.")
+            else:
+                top = ranking.iloc[0]
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric("Most Important Feature", top["Feature"])
+                mc2.metric("Agreement Score", f"{top['Cross-Algorithm Agreement']*100:.1f}%")
+                mc3.metric("Consensus Anomalies", int(top["Consensus Anomalies"]))
+
+                # Bar chart: features ranked by cross-algorithm agreement (importance)
+                fig_fi = go.Figure(go.Bar(
+                    x=ranking["Feature"], y=ranking["Cross-Algorithm Agreement"] * 100,
+                    marker_color="#3b82f6",
+                    text=[f"{v*100:.1f}%" for v in ranking["Cross-Algorithm Agreement"]],
+                    textposition="outside"))
+                fig_fi.update_layout(
+                    title="Feature Importance Ranking (Cross-Algorithm Agreement)",
+                    yaxis_title="Agreement Score (%)",
+                    height=350, **PLOTLY_LAYOUT)
+                st.plotly_chart(fig_fi, use_container_width=True, config={"displayModeBar": False})
+
+                # Full ranking table with per-algorithm anomaly counts for transparency
+                st.dataframe(
+                    ranking.style.format({"Cross-Algorithm Agreement": "{:.3f}"}),
+                    use_container_width=True)
 
 
 def page_quality(df):
