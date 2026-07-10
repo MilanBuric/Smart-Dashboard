@@ -939,8 +939,9 @@ class ControlPanelValidator:
 
 class QualityAssessment:
     """
-    Hypothesis H2: It is possible to assess the quality of control panel data.
-    Weighted framework: Completeness 30%, Accuracy/Outliers 30%, Stability 40%.
+    Hypothesis H2
+It is possible to visualize the proposed data preprocessing concept and track the elimination of anomalies through the control panel.
+This page quantifies that tracking with a weighted quality score — Completeness (30%), Accuracy / Outlier Detection (30%), and Stability (40%) — computed before and after correction, so the visible improvement reflects a measurable reduction in anomalies.
     """
 
     @staticmethod
